@@ -1,0 +1,27 @@
+# ============================================================
+#  .gitignore — Class-Project / School Lab Inventory Manager
+#  Files and folders listed here are NEVER tracked by Git.
+# ============================================================
+
+# --- Python virtual environment ---
+# The venv/ folder contains the installed libraries (mysql-connector-python).
+# It is machine-specific, large, and can be recreated with:
+#   python -m venv venv && venv/bin/pip install mysql-connector-python
+venv/
+
+# --- Python bytecode cache ---
+# Python auto-generates these .pyc files when it runs .py files.
+# They are machine-specific and do not need to be version-controlled.
+__pycache__/
+*.pyc
+*.pyo
+
+# --- Environment / secrets files ---
+# .env contains the GitHub PAT and other sensitive credentials.
+# NEVER commit this — it would expose your token publicly on GitHub.
+.env
+*.env
+
+# --- OS junk files ---
+.DS_Store
+Thumbs.db

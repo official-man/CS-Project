@@ -1,0 +1,301 @@
+================================================================
+  REVISION_NOTES.txt
+  School Lab Inventory Manager — CBSE Class 12 CS Project
+  Viva Cheat Sheet: How mysql-connector Cursor Executes CRUD
+================================================================
+  Prepared for: Non-technical team members / Viva preparation
+  Format: Line-by-line mechanical data-flow breakdown
+================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART A — THE FOUR MAGIC LINES (appear in EVERY function)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  LINE 1 →  conn = get_connection()
+  WHAT HAPPENS:
+    • Python calls mysql.connector.connect(host, user, password, database).
+    • The connector library opens a TCP socket to port 3306 on localhost.
+    • MySQL authenticates the username + password.
+    • MySQL selects the LabInventory database automatically.
+    • A "connection object" (conn) is returned and stored in Python memory.
+  VIVA TIP: Without this line, NO query can reach MySQL at all.
+
+  LINE 2 →  cursor = conn.cursor()
+  WHAT HAPPENS:
+    • A "cursor" is created INSIDE the already-open connection.
+    • Think of conn as a telephone line and cursor as the person speaking.
+    • The cursor is the object that actually sends SQL text to MySQL.
+    • One connection can have multiple cursors (but we only need one here).
+  VIVA TIP: cursor is NOT a database object — it lives only in Python RAM.
+
+  LINE 3 →  cursor.close()
+  WHAT HAPPENS:
+    • Tells Python to discard the cursor object from memory.
+    • The underlying connection (conn) is still open at this point.
+  VIVA TIP: Good practice — always close cursor before closing connection.
+
+  LINE 4 →  conn.close()
+  WHAT HAPPENS:
+    • Closes the TCP socket to MySQL.
+    • MySQL server releases the session resources for this connection.
+    • After this line, conn is dead; using it again will throw an error.
+  VIVA TIP: If you skip conn.close(), the socket stays open (resource leak).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART B — cursor.execute()  EXPLAINED STEP BY STEP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  SYNTAX:   cursor.execute(sql_string, values_tuple)
+
+  STEP 1 — Python hands the sql_string to the cursor.
+            The sql_string contains %s as safe placeholders,
+            e.g.  "INSERT INTO Items (name, total_qty) VALUES (%s, %s)"
+
+  STEP 2 — The cursor takes the values_tuple (e.g. ("Beaker", 50))
+            and replaces each %s with the matching value.
+            It automatically adds quotes around strings and escapes
+            special characters — this PREVENTS SQL Injection attacks.
+
+  STEP 3 — The final SQL text is sent over the TCP connection to MySQL.
+            MySQL's parser reads it, checks the syntax, and executes it.
+
+  STEP 4 — MySQL sends a small "OK" or result packet back to Python.
+
+  WHY %s AND NOT f-strings?
+    Using f-strings like f"INSERT ... VALUES ('{name}')" is DANGEROUS.
+    A hacker could type   '); DROP TABLE Items; --   as a name
+    and destroy the whole table. %s prevents this completely.
+    ALWAYS use %s placeholders in real projects.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART C — CREATE (INSERT) : add_item() function
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  OPERATION: Add a brand-new lab item to the Items table.
+
+  DATA FLOW:
+    User types → Python input() → Python variable →
+    cursor.execute(INSERT) → MySQL inserts row → conn.commit() saves it.
+
+  SQL USED:
+    INSERT INTO Items (name, total_qty) VALUES (%s, %s)
+
+  HOW MYSQL PROCESSES IT:
+    1. MySQL finds the Items table.
+    2. MySQL creates a new row at the bottom.
+    3. item_id is filled automatically (AUTO_INCREMENT adds 1 to last ID).
+    4. name column is filled with the user's typed text.
+    5. total_qty column is filled with the user's typed number.
+    6. The row is written to MySQL's internal storage buffer.
+    7. conn.commit() flushes the buffer → data is now permanently on disk.
+
+  KEY TERM — conn.commit():
+    • MySQL uses a system called TRANSACTION CONTROL.
+    • By default, changes are held in a temporary buffer.
+    • commit() tells MySQL "I confirm this change — save it forever."
+    • If the program crashes BEFORE commit(), the change is LOST (rollback).
+    • This protects data from partial writes caused by power cuts or errors.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART D — READ (SELECT) : view_inventory() function
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  OPERATION: Retrieve and display ALL rows from the Items table.
+
+  DATA FLOW:
+    cursor.execute(SELECT) → MySQL scans Items table →
+    MySQL sends rows over TCP → cursor stores rows in Python memory →
+    fetchall() returns a Python list of tuples → for loop prints each row.
+
+  SQL USED:
+    SELECT item_id, name, total_qty FROM Items ORDER BY item_id
+
+  HOW MYSQL PROCESSES IT:
+    1. MySQL opens the Items table file on disk.
+    2. It scans every row from top to bottom.
+    3. It picks only the three requested columns (item_id, name, total_qty).
+    4. It sorts all rows by item_id in ascending order.
+    5. It sends the sorted result set back to Python row by row.
+
+  PYTHON SIDE — fetchall() vs fetchone():
+    • cursor.fetchone()  → retrieves ONLY the FIRST result row as a tuple.
+                           Returns None if no rows matched the query.
+    • cursor.fetchall() → retrieves ALL remaining result rows at once
+                          as a Python LIST of tuples.
+    • Example: [( 1, "Beaker 250ml", 50 ), ( 2, "Test Tube", 120 )]
+    • Each inner tuple matches the column order in the SELECT statement.
+
+  VIVA TIP: After execute() with a SELECT, the data lives inside the cursor
+  object until you call fetch. It is NOT automatically in a variable.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART E — UPDATE : issue_item() and restock_item() functions
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  OPERATION: Change the total_qty of an existing item in the Items table.
+
+  DATA FLOW (issue_item):
+    User types item_id + qty →
+    SELECT to verify item exists and check current stock →
+    fetchone() reads current_qty →
+    If qty <= current_qty:
+      cursor.execute(UPDATE Items ...) → MySQL modifies the row →
+      cursor.execute(INSERT INTO Transactions ...) → MySQL logs it →
+      conn.commit() → both changes saved permanently.
+
+  SQL USED (issue):
+    UPDATE Items SET total_qty = total_qty - %s WHERE item_id = %s
+
+  SQL USED (restock):
+    UPDATE Items SET total_qty = total_qty + %s WHERE item_id = %s
+
+  HOW MYSQL PROCESSES THE UPDATE:
+    1. MySQL scans the Items table to find the row WHERE item_id matches.
+    2. MySQL reads the current value of total_qty for that specific row.
+    3. MySQL subtracts (or adds) the given number from that value.
+    4. MySQL writes the new value back into that same cell.
+    5. Only ONE row is changed because the WHERE clause is specific.
+
+  WHY TWO cursor.execute() CALLS BEFORE ONE commit()?
+    • The first execute() runs the UPDATE on Items.
+    • The second execute() runs the INSERT into Transactions.
+    • Both changes are held in MySQL's buffer (not yet permanent).
+    • A single conn.commit() saves BOTH together as one atomic operation.
+    • "Atomic" means: either BOTH succeed, or NEITHER is saved.
+    • This prevents situations like stock changing but no log being written.
+
+  VIVA TIP: This "both-or-nothing" guarantee is called ATOMICITY —
+  the "A" in the ACID properties of databases.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART F — FILTERED READ (SELECT + WHERE) : check_low_stock()
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  OPERATION: Find all items whose quantity is at or below a threshold.
+
+  SQL USED:
+    SELECT item_id, name, total_qty FROM Items
+    WHERE total_qty <= %s ORDER BY total_qty
+
+  HOW MYSQL PROCESSES IT:
+    1. MySQL scans every row of the Items table.
+    2. For each row, it checks: is total_qty <= threshold?
+    3. Rows where the condition is TRUE are added to the result set.
+    4. Rows where the condition is FALSE are silently skipped.
+    5. The qualifying rows are sorted by total_qty (lowest first).
+    6. The filtered list is sent back to Python.
+
+  VIVA TIP: The WHERE clause is applied INSIDE MySQL before data is sent
+  to Python. This is more efficient than fetching all rows and filtering
+  in Python — MySQL is optimised for this kind of filtering.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART G — JOIN READ : view_transactions() function
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  OPERATION: Show transaction history with the actual item name
+             (not just item_id) by combining two tables.
+
+  SQL USED:
+    SELECT t.trans_id, i.name, t.date, t.qty_change, t.purpose
+    FROM   Transactions t
+    JOIN   Items i ON t.item_id = i.item_id
+    ORDER  BY t.trans_id DESC
+
+  WHAT IS A JOIN?
+    • The Transactions table stores item_id (a number, e.g. 3).
+    • The Items table stores the actual name for item_id = 3 ("Beaker").
+    • JOIN tells MySQL: "For each Transactions row, look up the Items row
+      where Items.item_id equals Transactions.item_id, and merge them."
+    • The result looks like one combined table with columns from both.
+
+  HOW MYSQL PROCESSES IT:
+    1. MySQL reads each row from the Transactions table (aliased as "t").
+    2. For each row's item_id, it finds the matching row in Items (aliased "i").
+    3. It combines the selected columns from both rows into one output row.
+    4. It sorts all output rows by trans_id in descending order (newest first).
+
+  SIGN CONVENTION for qty_change:
+    • NEGATIVE number = items were ISSUED (stock went DOWN).
+    • POSITIVE number = items were RESTOCKED (stock went UP).
+    • The code adds a "+" prefix to positives to make the direction clear.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART H — FOREIGN KEY : what it does in real life
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  DEFINED IN setup.sql as:
+    FOREIGN KEY (item_id) REFERENCES Items(item_id) ON DELETE CASCADE
+
+  WHAT IT ENFORCES:
+    • You CANNOT insert a Transactions row with an item_id that does
+      not exist in the Items table. MySQL will REJECT the INSERT.
+    • If an Items row is deleted, all Transactions rows that reference
+      its item_id are AUTOMATICALLY deleted too (CASCADE).
+
+  WHY THIS MATTERS:
+    • Without a foreign key, you could have orphan transaction records
+      pointing to items that no longer exist — corrupt data.
+    • The foreign key is a referential integrity constraint that keeps
+      the two tables consistent with each other at all times.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART I — QUICK VIVA Q&A FLASHCARDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Q1: What is a cursor in mysql-connector?
+  A1: A cursor is a Python object that acts as a middleman between Python
+      code and the MySQL server. It sends SQL commands and receives results.
+
+  Q2: What is the difference between execute() and commit()?
+  A2: execute() sends an SQL command to MySQL but does NOT save it
+      permanently. commit() permanently writes the change to disk.
+
+  Q3: What does fetchone() return if no row matches the WHERE clause?
+  A3: It returns None (Python's null value).
+
+  Q4: Why do we use %s placeholders instead of string concatenation?
+  A4: To prevent SQL Injection attacks. The connector automatically
+      escapes dangerous characters in user input before sending to MySQL.
+
+  Q5: What is AUTO_INCREMENT?
+  A5: A MySQL column property that automatically assigns the next
+      available integer (1, 2, 3, ...) to item_id/trans_id whenever
+      a new row is inserted, so we never have to provide that ID manually.
+
+  Q6: What is the difference between fetchone() and fetchall()?
+  A6: fetchone() returns a single tuple (one row).
+      fetchall() returns a list of tuples (all remaining rows).
+
+  Q7: What CRUD operation does each SQL keyword represent?
+  A7: CREATE → INSERT
+      READ   → SELECT
+      UPDATE → UPDATE
+      DELETE → DELETE
+
+  Q8: What does ON DELETE CASCADE mean?
+  A8: When a parent row (in Items) is deleted, all child rows in
+      Transactions that reference it are automatically deleted too.
+
+  Q9: Why is conn.commit() called after the UPDATE and INSERT in
+      issue_item() but only once?
+  A9: Both changes are held in a single MySQL transaction buffer.
+      One commit() saves both atomically — either both succeed or
+      neither is permanently saved. This ensures data consistency.
+
+  Q10: What module is imported and why?
+  A10: mysql.connector — to connect Python to MySQL.
+       datetime.date   — to get today's date to stamp on transactions.
+
+================================================================
+  END OF REVISION NOTES
+================================================================
