@@ -299,3 +299,223 @@
 ================================================================
   END OF REVISION NOTES
 ================================================================
+
+
+================================================================
+  REVISION_NOTES.txt  —  ADDENDUM
+  Phase 2: tkinter GUI — How Buttons Trigger SQL Functions
+  Viva Cheat Sheet for GUI Questions
+================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART J — WHAT IS tkinter AND HOW DOES IT WORK?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  tkinter is Python's built-in GUI (Graphical User Interface) library.
+  It is part of the Python standard library — no installation needed.
+  It creates real OS windows (title bar, buttons, text boxes) using
+  the same system that your operating system uses to draw windows.
+
+  KEY TERM — Event Loop:
+    root.mainloop() starts the "event loop" — an infinite loop
+    inside tkinter that waits for user actions (mouse clicks, key
+    presses, window resize) and responds to them. The program does
+    NOT exit until the user closes the window.
+
+  KEY TERM — Widget:
+    A widget is any visible element in the GUI window:
+    • tk.Label     → displays static text
+    • tk.Entry     → a text input box (like a form field)
+    • tk.Button    → a clickable button
+    • tk.Frame     → an invisible container to group other widgets
+    • tk.LabelFrame→ a container with a visible border and title
+    • ttk.Treeview → a table with rows and columns (like a spreadsheet)
+    • ttk.Scrollbar→ a scroll bar linked to a Treeview or Canvas
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART K — HOW A BUTTON CLICK REACHES THE DATABASE
+  (The Most Important Viva Question)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  FULL DATA FLOW — example: clicking "Add Item":
+
+  STEP 1 — USER ACTION:
+    User types "Beaker 250ml" in the Name Entry and "50" in the
+    Qty Entry, then clicks the "➕ Add Item" button.
+
+  STEP 2 — TKINTER DETECTS THE CLICK:
+    tkinter's event loop detects the mouse click on the button.
+    It looks at the button's `command=` parameter to know what
+    function to call.
+
+  STEP 3 — command= AND lambda:
+    The button was created with:
+      command = lambda: action_add_item(entry_name, entry_qty, tree_inventory)
+
+    `lambda:` creates a tiny anonymous function that calls
+    action_add_item() with the Entry widgets as arguments.
+    This lambda runs NOW (at click time), passing live references
+    to the Entry widget objects.
+
+  STEP 4 — GUI ACTION FUNCTION RUNS:
+    action_add_item() runs:
+      a) Calls entry_name.get() → reads "Beaker 250ml" from the Entry widget
+      b) Calls entry_qty.get()  → reads "50" from the Entry widget
+      c) Validates the inputs (not empty, is a number)
+      d) Calls db_add_item("Beaker 250ml", 50)
+
+  STEP 5 — BACKEND DATABASE FUNCTION RUNS:
+    db_add_item() runs:
+      a) get_connection()   → opens a socket to MariaDB
+      b) conn.cursor()      → creates the cursor
+      c) cursor.execute("INSERT INTO Items ...", ("Beaker 250ml", 50))
+                            → sends SQL to MariaDB; MariaDB inserts the row
+      d) conn.commit()      → permanently saves the row to disk
+      e) cursor.close() / conn.close() → clean up
+
+  STEP 6 — GUI UPDATES:
+    Back in action_add_item():
+      a) messagebox.showinfo() → shows a green "Success" popup
+      b) entry_name.delete()   → clears the Name Entry field
+      c) entry_qty.delete()    → clears the Qty Entry field
+      d) refresh_inventory()   → calls db_fetch_inventory(), then
+                                  load_treeview() to reload the table
+                                  so the new item appears immediately
+
+  SUMMARY OF THE CHAIN:
+    Button click → command lambda → action function → db function →
+    cursor.execute(SQL) → MariaDB → conn.commit() → messagebox → Treeview refresh
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART L — WHY lambda: IS REQUIRED ON BUTTON COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  WRONG (runs at startup, not at click):
+    command = action_add_item(entry_name, entry_qty, tree)
+    # This calls the function IMMEDIATELY when Python reads this line.
+    # The button click will then do nothing because the return value
+    # of the function (None) is stored as command, not the function.
+
+  CORRECT (runs only when clicked):
+    command = lambda: action_add_item(entry_name, entry_qty, tree)
+    # lambda: creates a no-argument wrapper function.
+    # tkinter stores THIS wrapper as the command and calls it on click.
+    # The wrapper then calls action_add_item() with its arguments.
+
+  VIVA TIP: "lambda is used because tkinter's command= parameter
+  expects a function reference with zero arguments. lambda wraps
+  our function call so we can pass arguments while still giving
+  tkinter a zero-argument callable."
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART M — TREEVIEW: HOW THE TABLE WORKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ttk.Treeview is the widget that shows database data as a table.
+
+  HOW DATA GETS INTO THE TREEVIEW:
+    1. db_fetch_inventory() runs a SELECT in MariaDB.
+    2. cursor.fetchall() returns a Python list of tuples.
+       Example: [(1, "Beaker", 50), (2, "Test Tube", 120)]
+    3. load_treeview() loops through this list and calls:
+       tree.insert("", tk.END, values=row)
+       for each tuple — this adds one visible table row.
+
+  HOW THE TABLE IS REFRESHED:
+    After every insert/update/delete operation, refresh_inventory()
+    is called. It first deletes all existing rows with:
+       for item in tree.get_children(): tree.delete(item)
+    Then re-fetches fresh data from MariaDB and re-inserts it.
+    This gives the appearance of a "live" real-time table.
+
+  VIVA TIP: "The Treeview does not automatically update when the
+  database changes. We manually clear and reload it after every
+  operation by calling refresh_inventory() or refresh_transactions()."
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART N — LOW STOCK ALERT: HOW THE FILTER WORKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  When user clicks "🔴 Show Low Stock":
+    1. action_low_stock() reads the threshold Entry (e.g. "10")
+    2. It calls db_fetch_inventory(threshold=10)
+    3. db_fetch_inventory() runs:
+         SELECT item_id, name, total_qty FROM Items
+         WHERE total_qty <= 10 ORDER BY total_qty
+    4. MariaDB filters and returns only the matching rows.
+    5. load_treeview() clears the table and shows only those rows.
+
+  When user clicks "🟢 Show All":
+    1. action_show_all() calls refresh_inventory() with no threshold.
+    2. db_fetch_inventory() runs SELECT with no WHERE clause.
+    3. All rows are fetched and displayed again.
+
+  VIVA TIP: "The filtering happens inside MariaDB using a WHERE
+  clause, not in Python. This is more efficient because MariaDB
+  only sends the relevant rows over the connection instead of
+  sending all rows and letting Python filter them."
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART O — QUICK VIVA Q&A: GUI-SPECIFIC FLASHCARDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Q11: What does root.mainloop() do?
+  A11: It starts tkinter's event loop — an infinite loop that keeps
+       the window alive and responds to user actions like button clicks
+       and key presses. The program exits only when the window is closed.
+
+  Q12: What is the difference between tk and ttk?
+  A12: tk is the base tkinter module with standard widgets.
+       ttk is "themed tkinter" — it provides enhanced widgets like
+       Treeview (the data table) with better styling.
+
+  Q13: Why is ttk.Treeview used instead of a simple text printout?
+  A13: Treeview displays database rows as an interactive table with
+       named column headers, making it easy to read and navigate.
+       It also supports scrollbars for large datasets.
+
+  Q14: How does entry.get() work?
+  A14: entry.get() reads and returns the current text string typed
+       inside a tk.Entry widget. It is called at click time (inside
+       the action function) so it always gets the LATEST typed value.
+
+  Q15: How does entry.delete(0, tk.END) work?
+  A15: It clears all text from a tk.Entry widget.
+       0 = start position, tk.END = end of the text string.
+       After calling this, the Entry box appears empty to the user.
+
+  Q16: What is a lambda in the context of tkinter buttons?
+  A16: lambda creates a small anonymous function with no arguments.
+       tkinter's command= parameter needs a zero-argument function.
+       lambda wraps our actual function call (which has arguments)
+       so tkinter can call it on click without us needing a named function.
+
+  Q17: What does messagebox.showerror() do?
+  A17: It pops up a small OS dialog box with a red "X" icon and an
+       error message. Used to alert the user of invalid input or
+       database errors. The user must click OK to dismiss it.
+
+  Q18: What does messagebox.showinfo() do?
+  A18: It pops up a small OS dialog box with a blue "i" icon and a
+       success message. The user must click OK to dismiss it.
+
+  Q19: What layout managers are used in the GUI?
+  A19: pack() — places widgets in a top-to-bottom or left-to-right
+                 stack automatically.
+       grid() — places widgets in a row/column grid (like a table).
+       Both are used in different sections for readability.
+
+  Q20: Is this code Object-Oriented? Does it use classes?
+  A20: No. The code is 100% procedural — it uses only functions,
+       if/elif/else, while loops, lists, and tuples. No classes are
+       defined. This aligns with the CBSE Class 12 CS curriculum.
+
+================================================================
+  END OF ADDENDUM — Phase 2 tkinter GUI Notes
+================================================================
