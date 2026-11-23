@@ -1,11 +1,64 @@
 ================================================================
   REVISION_NOTES.txt
   School Lab Inventory Manager — CBSE Class 12 CS Project
-  Viva Cheat Sheet: How mysql-connector Cursor Executes CRUD
+  Comprehensive Viva Cheat Sheet & Mechanical Code Breakdown
 ================================================================
-  Prepared for: Non-technical team members / Viva preparation
-  Format: Line-by-line mechanical data-flow breakdown
+  Prepared for: Students, Non-technical teammates, Viva Prep
+  Curriculum  : CBSE Class 12 Computer Science (Python + SQL)
+  Architecture: 100% Procedural (Zero Classes, Functions Only)
 ================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART 0 — WHY CAN'T I JUST RUN `python terminal_app.py`?
+  (Most Common First-Run Problem — UNDERSTAND THIS FOR VIVA)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  THE ERROR YOU MIGHT SEE:
+    ModuleNotFoundError: No module named 'mysql'
+
+  WHY DOES THIS HAPPEN?
+    mysql-connector-python is NOT part of Python's built-in standard
+    library. It is a third-party package that must be installed.
+    When you type `python terminal_app.py`, Python uses the SYSTEM
+    Python installation, which only has the standard built-in modules.
+    The MySQL connector is installed inside the `venv/` folder, NOT
+    in the system Python. So the system Python cannot find it.
+
+  WHAT IS A VIRTUAL ENVIRONMENT (venv)?
+    A venv is a self-contained copy of Python in a local folder.
+    It has its OWN pip and its OWN installed packages, completely
+    separate from the system Python. This prevents conflicts between
+    projects that need different library versions.
+    Our project's venv lives at:  Class-Project/venv/
+
+  THE FIX (Archcraft / Arch Linux):
+    OPTION A — Use the run script (easiest, no typing required):
+      ./run_terminal.sh
+    OPTION B — Activate the venv manually FIRST, then run:
+      source venv/bin/activate
+      python terminal_app.py
+    After running `source venv/bin/activate`, your terminal prompt
+    changes to: (venv) user@machine:...$ — this means venv is active.
+
+  THE FIX (Windows):
+    OPTION A — Double-click run_terminal.bat (easiest)
+    OPTION B — Activate the venv manually in Command Prompt:
+      venv\Scripts\activate
+      python terminal_app.py
+
+  VIVA TIP: "mysql-connector-python is a third-party library. Because
+  Arch Linux uses an externally-managed Python installation, all extra
+  packages must be installed inside a virtual environment using pip.
+  We activate the venv using `source venv/bin/activate` so Python
+  can find the installed mysql.connector module."
+
+  WHY THE SCRIPTS FIX IT AUTOMATICALLY:
+    run_terminal.sh and run_terminal.bat both check if the venv
+    exists and if mysql.connector is installed. If either is missing,
+    they create the venv and run pip install automatically, then
+    launch the app using venv/bin/python (Linux) or
+    venv\Scripts\python.exe (Windows) directly — bypassing system Python.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -14,11 +67,11 @@
 
   LINE 1 →  conn = get_connection()
   WHAT HAPPENS:
-    • Python calls mysql.connector.connect(host, user, password, database).
-    • The connector library opens a TCP socket to port 3306 on localhost.
+    • Python calls get_connection() from db_config.py.
+    • The connector library opens a connection to MySQL/MariaDB.
     • MySQL authenticates the username + password.
     • MySQL selects the LabInventory database automatically.
-    • A "connection object" (conn) is returned and stored in Python memory.
+    • A "connection object" (conn) is returned and stored in memory.
   VIVA TIP: Without this line, NO query can reach MySQL at all.
 
   LINE 2 →  cursor = conn.cursor()
@@ -26,496 +79,491 @@
     • A "cursor" is created INSIDE the already-open connection.
     • Think of conn as a telephone line and cursor as the person speaking.
     • The cursor is the object that actually sends SQL text to MySQL.
-    • One connection can have multiple cursors (but we only need one here).
-  VIVA TIP: cursor is NOT a database object — it lives only in Python RAM.
+    • One connection can have multiple cursors (we use one at a time).
+  VIVA TIP: cursor is NOT a database object — it lives in Python RAM.
 
   LINE 3 →  cursor.close()
   WHAT HAPPENS:
-    • Tells Python to discard the cursor object from memory.
+    • Discards the cursor object and releases server-side statement memory.
     • The underlying connection (conn) is still open at this point.
-  VIVA TIP: Good practice — always close cursor before closing connection.
+  VIVA TIP: Always close the cursor before closing the connection.
 
   LINE 4 →  conn.close()
   WHAT HAPPENS:
-    • Closes the TCP socket to MySQL.
-    • MySQL server releases the session resources for this connection.
-    • After this line, conn is dead; using it again will throw an error.
-  VIVA TIP: If you skip conn.close(), the socket stays open (resource leak).
+    • Closes the connection socket to MySQL.
+    • MySQL server terminates the session and frees associated buffers.
+    • After this line, conn cannot be reused without reconnecting.
+  VIVA TIP: If you skip conn.close(), the connection stays open (resource leak).
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART B — cursor.execute()  EXPLAINED STEP BY STEP
+  PART B — DATABASE CONFIGURATION & CROSS-PLATFORM COMPATIBILITY
+  (db_config.py)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  SYNTAX:   cursor.execute(sql_string, values_tuple)
+  1. WHY HAVE A SEPARATE db_config.py?
+     • Modularity: Keeps database credentials in one central file.
+       If the database password or port changes, you edit ONLY
+       db_config.py instead of searching through every file.
+     • Separation of Concerns: Interface logic (terminal or GUI)
+       remains clean and focused on user interaction, while database
+       connection mechanics are handled in one place.
 
-  STEP 1 — Python hands the sql_string to the cursor.
-            The sql_string contains %s as safe placeholders,
-            e.g.  "INSERT INTO Items (name, total_qty) VALUES (%s, %s)"
+  2. THE DB_CONFIG DICTIONARY:
+     DB_CONFIG = {
+         "host": "localhost",
+         "user": "root",
+         "password": ""
+     }
+     • School Lab (Windows): Usually user="root" and password="" (empty).
+     • Home (Linux/Windows): Change password="" to your custom password.
 
-  STEP 2 — The cursor takes the values_tuple (e.g. ("Beaker", 50))
-            and replaces each %s with the matching value.
-            It automatically adds quotes around strings and escapes
-            special characters — this PREVENTS SQL Injection attacks.
-
-  STEP 3 — The final SQL text is sent over the TCP connection to MySQL.
-            MySQL's parser reads it, checks the syntax, and executes it.
-
-  STEP 4 — MySQL sends a small "OK" or result packet back to Python.
-
-  WHY %s AND NOT f-strings?
-    Using f-strings like f"INSERT ... VALUES ('{name}')" is DANGEROUS.
-    A hacker could type   '); DROP TABLE Items; --   as a name
-    and destroy the whole table. %s prevents this completely.
-    ALWAYS use %s placeholders in real projects.
+  3. HOW CROSS-PLATFORM CONNECTION WORKS:
+     • Windows: MySQL connects over standard TCP port 3306 using
+       the host, user, and password from DB_CONFIG.
+     • Archcraft / Arch Linux: MariaDB frequently uses unix_socket
+       authentication for local users. If standard TCP fails, our
+       get_connection() automatically catches the exception and falls
+       back to connecting via the local socket file (/run/mysqld/mysqld.sock)
+       using the current logged-in Linux username.
+     • Result: The project runs out-of-the-box on both Linux and Windows
+       without requiring manual code changes!
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART C — CREATE (INSERT) : add_item() function
+  PART C — AUTO-INITIALIZING DATABASE (initialize_database())
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  OPERATION: Add a brand-new lab item to the Items table.
+  WHAT PROBLEM DOES IT SOLVE?
+    When running a project on a school lab computer or a fresh PC,
+    the application usually crashes with "Database does not exist" or
+    "Table does not exist" unless someone manually opens a MySQL terminal
+    and runs setup.sql.
+    initialize_database() fixes this completely!
+
+  HOW IT WORKS (STEP-BY-STEP):
+    1. get_connection(database=None) connects to the MySQL server
+       WITHOUT specifying a database name.
+    2. cursor.execute("CREATE DATABASE IF NOT EXISTS LabInventory")
+       creates the database if it doesn't already exist.
+    3. cursor.execute("USE LabInventory") switches the session context
+       to the LabInventory database.
+    4. cursor.execute("CREATE TABLE IF NOT EXISTS Items (...)")
+       creates the master inventory table if missing.
+    5. cursor.execute("CREATE TABLE IF NOT EXISTS Transactions (...)")
+       creates the transaction audit log table with a Foreign Key.
+    6. conn.commit() ensures table definitions are permanently stored.
+    7. cursor.close() and conn.close() cleanly release resources.
+
+  VIVA TIP: "Both terminal_app.py and gui_app.py call initialize_database()
+  immediately on startup. This guarantees zero-setup execution on any
+  examiner's machine."
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART D — cursor.execute() EXPLAINED (%s vs SQL INJECTION)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  SYNTAX: cursor.execute(sql_string, values_tuple)
+
+  STEP 1 — Python hands the SQL string template to the cursor.
+            The string uses %s placeholders:
+            "INSERT INTO Items (name, total_qty) VALUES (%s, %s)"
+
+  STEP 2 — The cursor takes the values tuple (e.g. ("Beaker 250ml", 50))
+            and securely formats the data for MySQL.
+            It wraps strings in quotes and escapes dangerous characters.
+
+  STEP 3 — The parsed query is sent to MySQL for execution.
+
+  WHY %s AND NEVER f-strings / STRING CONCATENATION?
+    If we used: f"INSERT INTO Items VALUES ('{name}', {qty})"
+    A malicious user could type:
+      Test Item'); DROP TABLE Items; --
+    This would cause MySQL to delete the entire table!
+    Using %s sends the query structure and user data separately,
+    making SQL Injection impossible.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART E — CREATE (INSERT) : add_item()
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  OPERATION: Insert a new lab apparatus or chemical into Items.
 
   DATA FLOW:
-    User types → Python input() → Python variable →
-    cursor.execute(INSERT) → MySQL inserts row → conn.commit() saves it.
+    User Input → Validation → get_connection() → cursor.execute(INSERT)
+    → MySQL writes to buffer → conn.commit() writes to disk.
 
-  SQL USED:
+  SQL STATEMENT:
     INSERT INTO Items (name, total_qty) VALUES (%s, %s)
 
-  HOW MYSQL PROCESSES IT:
-    1. MySQL finds the Items table.
-    2. MySQL creates a new row at the bottom.
-    3. item_id is filled automatically (AUTO_INCREMENT adds 1 to last ID).
-    4. name column is filled with the user's typed text.
-    5. total_qty column is filled with the user's typed number.
-    6. The row is written to MySQL's internal storage buffer.
-    7. conn.commit() flushes the buffer → data is now permanently on disk.
-
-  KEY TERM — conn.commit():
-    • MySQL uses a system called TRANSACTION CONTROL.
-    • By default, changes are held in a temporary buffer.
-    • commit() tells MySQL "I confirm this change — save it forever."
-    • If the program crashes BEFORE commit(), the change is LOST (rollback).
-    • This protects data from partial writes caused by power cuts or errors.
+  ROLE OF conn.commit():
+    • MySQL operates under transaction control.
+    • Changes are held in an in-memory buffer until committed.
+    • commit() tells MySQL to flush the buffer and save permanently.
+    • If an unhandled exception or crash occurs before commit(),
+      MySQL automatically rolls back, preserving data integrity.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART D — READ (SELECT) : view_inventory() function
+  PART F — READ (SELECT) : view_inventory() & FETCHING DATA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  OPERATION: Retrieve and display ALL rows from the Items table.
+  OPERATION: Retrieve and display all rows from Items table.
 
-  DATA FLOW:
-    cursor.execute(SELECT) → MySQL scans Items table →
-    MySQL sends rows over TCP → cursor stores rows in Python memory →
-    fetchall() returns a Python list of tuples → for loop prints each row.
+  SQL STATEMENT:
+    SELECT item_id, name, total_qty FROM Items ORDER BY item_id ASC
 
-  SQL USED:
-    SELECT item_id, name, total_qty FROM Items ORDER BY item_id
+  PYTHON DATA FETCHING:
+    • cursor.fetchone():
+      Returns the next matching row as a single tuple (e.g. (1, "Beaker", 50)).
+      Returns None if no rows match or no more rows remain.
+    • cursor.fetchall():
+      Returns ALL matching rows at once as a Python list of tuples.
+      Example: [(1, "Beaker", 50), (2, "Test Tube", 120)]
+      Returns an empty list [] if no rows match.
 
-  HOW MYSQL PROCESSES IT:
-    1. MySQL opens the Items table file on disk.
-    2. It scans every row from top to bottom.
-    3. It picks only the three requested columns (item_id, name, total_qty).
-    4. It sorts all rows by item_id in ascending order.
-    5. It sends the sorted result set back to Python row by row.
-
-  PYTHON SIDE — fetchall() vs fetchone():
-    • cursor.fetchone()  → retrieves ONLY the FIRST result row as a tuple.
-                           Returns None if no rows matched the query.
-    • cursor.fetchall() → retrieves ALL remaining result rows at once
-                          as a Python LIST of tuples.
-    • Example: [( 1, "Beaker 250ml", 50 ), ( 2, "Test Tube", 120 )]
-    • Each inner tuple matches the column order in the SELECT statement.
-
-  VIVA TIP: After execute() with a SELECT, the data lives inside the cursor
-  object until you call fetch. It is NOT automatically in a variable.
+  VIVA TIP: "After calling cursor.execute() with a SELECT query,
+  the result set lives in the MySQL cursor buffer until retrieved
+  using fetchone() or fetchall()."
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART E — UPDATE : issue_item() and restock_item() functions
+  PART G — UPDATE : issue_item() & restock_item() & ATOMICITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  OPERATION: Change the total_qty of an existing item in the Items table.
+  OPERATION: Modify total_qty and simultaneously record an audit row.
 
-  DATA FLOW (issue_item):
-    User types item_id + qty →
-    SELECT to verify item exists and check current stock →
-    fetchone() reads current_qty →
-    If qty <= current_qty:
-      cursor.execute(UPDATE Items ...) → MySQL modifies the row →
-      cursor.execute(INSERT INTO Transactions ...) → MySQL logs it →
-      conn.commit() → both changes saved permanently.
+  SQL STATEMENTS (issue):
+    1. SELECT name, total_qty FROM Items WHERE item_id = %s
+    2. UPDATE Items SET total_qty = total_qty - %s WHERE item_id = %s
+    3. INSERT INTO Transactions (item_id, date, qty_change, purpose)
+       VALUES (%s, %s, %s, %s)
 
-  SQL USED (issue):
-    UPDATE Items SET total_qty = total_qty - %s WHERE item_id = %s
-
-  SQL USED (restock):
-    UPDATE Items SET total_qty = total_qty + %s WHERE item_id = %s
-
-  HOW MYSQL PROCESSES THE UPDATE:
-    1. MySQL scans the Items table to find the row WHERE item_id matches.
-    2. MySQL reads the current value of total_qty for that specific row.
-    3. MySQL subtracts (or adds) the given number from that value.
-    4. MySQL writes the new value back into that same cell.
-    5. Only ONE row is changed because the WHERE clause is specific.
-
-  WHY TWO cursor.execute() CALLS BEFORE ONE commit()?
-    • The first execute() runs the UPDATE on Items.
-    • The second execute() runs the INSERT into Transactions.
-    • Both changes are held in MySQL's buffer (not yet permanent).
-    • A single conn.commit() saves BOTH together as one atomic operation.
-    • "Atomic" means: either BOTH succeed, or NEITHER is saved.
-    • This prevents situations like stock changing but no log being written.
-
-  VIVA TIP: This "both-or-nothing" guarantee is called ATOMICITY —
-  the "A" in the ACID properties of databases.
+  WHAT IS ATOMICITY (ACID PROPERTIES)?
+    • In issue_item() and restock_item(), TWO database modifications occur:
+      an UPDATE on Items and an INSERT on Transactions.
+    • Both execute() statements are called within the same connection.
+    • Exactly ONE conn.commit() is called after both succeed.
+    • If the script crashes after the UPDATE but before the INSERT,
+      NEITHER change is saved.
+    • This ensures stock numbers never change without an audit trail.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART F — FILTERED READ (SELECT + WHERE) : check_low_stock()
+  PART H — FILTERED READ : check_low_stock()
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  OPERATION: Find all items whose quantity is at or below a threshold.
+  OPERATION: Find items whose stock is at or below a user threshold.
 
-  SQL USED:
+  SQL STATEMENT:
     SELECT item_id, name, total_qty FROM Items
-    WHERE total_qty <= %s ORDER BY total_qty
+    WHERE total_qty <= %s ORDER BY total_qty ASC
 
-  HOW MYSQL PROCESSES IT:
-    1. MySQL scans every row of the Items table.
-    2. For each row, it checks: is total_qty <= threshold?
-    3. Rows where the condition is TRUE are added to the result set.
-    4. Rows where the condition is FALSE are silently skipped.
-    5. The qualifying rows are sorted by total_qty (lowest first).
-    6. The filtered list is sent back to Python.
-
-  VIVA TIP: The WHERE clause is applied INSIDE MySQL before data is sent
-  to Python. This is more efficient than fetching all rows and filtering
-  in Python — MySQL is optimised for this kind of filtering.
+  WHY FILTER IN SQL INSTEAD OF PYTHON?
+    • If we fetch all 5,000 items into Python and use an `if qty <= 10:`,
+      all 5,000 rows must travel over the network.
+    • By putting `WHERE total_qty <= %s` in MySQL, the database engine
+      uses indexed filtering and sends only the 3 matching rows.
+    • This reduces memory consumption and network latency.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART G — JOIN READ : view_transactions() function
+  PART I — JOIN READ : view_transactions() & FOREIGN KEYS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  OPERATION: Show transaction history with the actual item name
-             (not just item_id) by combining two tables.
+  OPERATION: Combine Transactions and Items tables to display
+             human-readable names instead of raw item_id numbers.
 
-  SQL USED:
-    SELECT t.trans_id, i.name, t.date, t.qty_change, t.purpose
+  SQL STATEMENT:
+    SELECT t.trans_id,
+           i.name,
+           t.date,
+           t.qty_change,
+           t.purpose
     FROM   Transactions t
     JOIN   Items i ON t.item_id = i.item_id
     ORDER  BY t.trans_id DESC
 
-  WHAT IS A JOIN?
-    • The Transactions table stores item_id (a number, e.g. 3).
-    • The Items table stores the actual name for item_id = 3 ("Beaker").
-    • JOIN tells MySQL: "For each Transactions row, look up the Items row
-      where Items.item_id equals Transactions.item_id, and merge them."
-    • The result looks like one combined table with columns from both.
+  FOREIGN KEY CONSTRAINT:
+    CONSTRAINT fk_item
+        FOREIGN KEY (item_id)
+        REFERENCES Items(item_id)
+        ON DELETE CASCADE
 
-  HOW MYSQL PROCESSES IT:
-    1. MySQL reads each row from the Transactions table (aliased as "t").
-    2. For each row's item_id, it finds the matching row in Items (aliased "i").
-    3. It combines the selected columns from both rows into one output row.
-    4. It sorts all output rows by trans_id in descending order (newest first).
-
-  SIGN CONVENTION for qty_change:
-    • NEGATIVE number = items were ISSUED (stock went DOWN).
-    • POSITIVE number = items were RESTOCKED (stock went UP).
-    • The code adds a "+" prefix to positives to make the direction clear.
+  REAL-WORLD SIGNIFICANCE:
+    • Prevents orphan records: You cannot add a transaction for an
+      item_id that does not exist in Items.
+    • ON DELETE CASCADE: If an item is deleted from Items, all its
+      historical transaction logs are automatically deleted too,
+      preventing dangling pointers and database corruption.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART H — FOREIGN KEY : what it does in real life
+  PART J — CONTINUOUS LOOP & INPUT VALIDATION (terminal_app.py)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  DEFINED IN setup.sql as:
-    FOREIGN KEY (item_id) REFERENCES Items(item_id) ON DELETE CASCADE
+  1. THE UNBROKEN while True LOOP:
+     • The main menu in terminal_app.py runs inside an unbroken `while True:` loop.
+     • The program displays options (1 to 7) and executes the chosen feature.
+     • It ONLY terminates when the user explicitly chooses Option 7 (`break`).
+     • If an invalid choice is entered, it prints a message and loops back.
 
-  WHAT IT ENFORCES:
-    • You CANNOT insert a Transactions row with an item_id that does
-      not exist in the Items table. MySQL will REJECT the INSERT.
-    • If an Items row is deleted, all Transactions rows that reference
-      its item_id are AUTOMATICALLY deleted too (CASCADE).
+  2. THE PAUSE MECHANISM:
+     • After every operation completes (or returns an error), the program calls:
+       input("\nPress Enter to return to menu...")
+     • Why? Without this pause, the terminal would immediately reprint the
+       menu and the user would never have time to read the confirmation
+       message or query results.
 
-  WHY THIS MATTERS:
-    • Without a foreign key, you could have orphan transaction records
-      pointing to items that no longer exist — corrupt data.
-    • The foreign key is a referential integrity constraint that keeps
-      the two tables consistent with each other at all times.
+  3. NUMERIC INPUT VALIDATION (try/except ValueError):
+     • In beginner programs, typing a letter like "abc" when prompted for an
+       ID or quantity causes Python to crash with `ValueError: invalid literal for int()`.
+     • We wrap all numeric inputs in `try/except ValueError`:
+         try:
+             qty = int(qty_input)
+         except ValueError:
+             print("Error: Quantity must be a valid whole number.")
+             return
+     • If the user types a letter, the error is caught gracefully, an
+       informative message is displayed, and the program returns to the
+       menu instead of crashing.
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART I — QUICK VIVA Q&A FLASHCARDS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  Q1: What is a cursor in mysql-connector?
-  A1: A cursor is a Python object that acts as a middleman between Python
-      code and the MySQL server. It sends SQL commands and receives results.
-
-  Q2: What is the difference between execute() and commit()?
-  A2: execute() sends an SQL command to MySQL but does NOT save it
-      permanently. commit() permanently writes the change to disk.
-
-  Q3: What does fetchone() return if no row matches the WHERE clause?
-  A3: It returns None (Python's null value).
-
-  Q4: Why do we use %s placeholders instead of string concatenation?
-  A4: To prevent SQL Injection attacks. The connector automatically
-      escapes dangerous characters in user input before sending to MySQL.
-
-  Q5: What is AUTO_INCREMENT?
-  A5: A MySQL column property that automatically assigns the next
-      available integer (1, 2, 3, ...) to item_id/trans_id whenever
-      a new row is inserted, so we never have to provide that ID manually.
-
-  Q6: What is the difference between fetchone() and fetchall()?
-  A6: fetchone() returns a single tuple (one row).
-      fetchall() returns a list of tuples (all remaining rows).
-
-  Q7: What CRUD operation does each SQL keyword represent?
-  A7: CREATE → INSERT
-      READ   → SELECT
-      UPDATE → UPDATE
-      DELETE → DELETE
-
-  Q8: What does ON DELETE CASCADE mean?
-  A8: When a parent row (in Items) is deleted, all child rows in
-      Transactions that reference it are automatically deleted too.
-
-  Q9: Why is conn.commit() called after the UPDATE and INSERT in
-      issue_item() but only once?
-  A9: Both changes are held in a single MySQL transaction buffer.
-      One commit() saves both atomically — either both succeed or
-      neither is permanently saved. This ensures data consistency.
-
-  Q10: What module is imported and why?
-  A10: mysql.connector — to connect Python to MySQL.
-       datetime.date   — to get today's date to stamp on transactions.
-
-================================================================
-  END OF REVISION NOTES
-================================================================
-
-
-================================================================
-  REVISION_NOTES.txt  —  ADDENDUM
-  Phase 2: tkinter GUI — How Buttons Trigger SQL Functions
-  Viva Cheat Sheet for GUI Questions
-================================================================
+  4. CROSS-PLATFORM SCREEN CLEARING:
+     • Windows uses the shell command `cls`.
+     • Linux / macOS uses the shell command `clear`.
+     • Our clear_screen() checks `os.name`:
+         cmd = "cls" if os.name == "nt" else "clear"
+         os.system(cmd)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART J — WHAT IS tkinter AND HOW DOES IT WORK?
+  PART K — TKINTER DESKTOP GUI ARCHITECTURE (gui_app.py)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  tkinter is Python's built-in GUI (Graphical User Interface) library.
-  It is part of the Python standard library — no installation needed.
-  It creates real OS windows (title bar, buttons, text boxes) using
-  the same system that your operating system uses to draw windows.
+  1. PURELY PROCEDURAL GUI:
+     • Standard GUI tutorials use Object-Oriented Programming (classes, self).
+     • However, CBSE Class 12 CS guidelines prioritize procedural programming.
+     • gui_app.py is 100% procedural: it uses functions that accept widget
+       references as parameters and bind callbacks.
 
-  KEY TERM — Event Loop:
-    root.mainloop() starts the "event loop" — an infinite loop
-    inside tkinter that waits for user actions (mouse clicks, key
-    presses, window resize) and responds to them. The program does
-    NOT exit until the user closes the window.
+  2. THE EVENT LOOP (root.mainloop()):
+     • In terminal programs, Python executes line by line sequentially.
+     • In GUI programs, `root.mainloop()` turns control over to tkinter's
+       event loop. It continuously listens for mouse clicks, keyboard presses,
+       and window resize events, dispatching callbacks accordingly.
 
-  KEY TERM — Widget:
-    A widget is any visible element in the GUI window:
-    • tk.Label     → displays static text
-    • tk.Entry     → a text input box (like a form field)
-    • tk.Button    → a clickable button
-    • tk.Frame     → an invisible container to group other widgets
-    • tk.LabelFrame→ a container with a visible border and title
-    • ttk.Treeview → a table with rows and columns (like a spreadsheet)
-    • ttk.Scrollbar→ a scroll bar linked to a Treeview or Canvas
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART K — HOW A BUTTON CLICK REACHES THE DATABASE
-  (The Most Important Viva Question)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  FULL DATA FLOW — example: clicking "Add Item":
-
-  STEP 1 — USER ACTION:
-    User types "Beaker 250ml" in the Name Entry and "50" in the
-    Qty Entry, then clicks the "➕ Add Item" button.
-
-  STEP 2 — TKINTER DETECTS THE CLICK:
-    tkinter's event loop detects the mouse click on the button.
-    It looks at the button's `command=` parameter to know what
-    function to call.
-
-  STEP 3 — command= AND lambda:
-    The button was created with:
-      command = lambda: action_add_item(entry_name, entry_qty, tree_inventory)
-
-    `lambda:` creates a tiny anonymous function that calls
-    action_add_item() with the Entry widgets as arguments.
-    This lambda runs NOW (at click time), passing live references
-    to the Entry widget objects.
-
-  STEP 4 — GUI ACTION FUNCTION RUNS:
-    action_add_item() runs:
-      a) Calls entry_name.get() → reads "Beaker 250ml" from the Entry widget
-      b) Calls entry_qty.get()  → reads "50" from the Entry widget
-      c) Validates the inputs (not empty, is a number)
-      d) Calls db_add_item("Beaker 250ml", 50)
-
-  STEP 5 — BACKEND DATABASE FUNCTION RUNS:
-    db_add_item() runs:
-      a) get_connection()   → opens a socket to MariaDB
-      b) conn.cursor()      → creates the cursor
-      c) cursor.execute("INSERT INTO Items ...", ("Beaker 250ml", 50))
-                            → sends SQL to MariaDB; MariaDB inserts the row
-      d) conn.commit()      → permanently saves the row to disk
-      e) cursor.close() / conn.close() → clean up
-
-  STEP 6 — GUI UPDATES:
-    Back in action_add_item():
-      a) messagebox.showinfo() → shows a green "Success" popup
-      b) entry_name.delete()   → clears the Name Entry field
-      c) entry_qty.delete()    → clears the Qty Entry field
-      d) refresh_inventory()   → calls db_fetch_inventory(), then
-                                  load_treeview() to reload the table
-                                  so the new item appears immediately
-
-  SUMMARY OF THE CHAIN:
-    Button click → command lambda → action function → db function →
-    cursor.execute(SQL) → MariaDB → conn.commit() → messagebox → Treeview refresh
+  3. WIDGETS USED IN gui_app.py:
+     • tk.Tk()        : The root application window.
+     • tk.Label       : Static text labels and header banners.
+     • tk.Entry       : Single-line text input fields.
+     • tk.Button      : Clickable push buttons styled with distinct colors.
+     • tk.LabelFrame  : Bordered grouping boxes with titles (e.g. "Add Item").
+     • ttk.Notebook   : Multi-tab container widget (Manage, Inventory, Logs).
+     • ttk.Treeview   : Spreadsheet-like table widget with columns and headers.
+     • ttk.Scrollbar  : Vertical scrollbar attached to the Treeview.
+     • messagebox     : System popup dialogs (.showinfo(), .showerror()).
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART L — WHY lambda: IS REQUIRED ON BUTTON COMMANDS
+  PART L — TKINTER EVENT CALLBACKS & lambda:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  WRONG (runs at startup, not at click):
-    command = action_add_item(entry_name, entry_qty, tree)
-    # This calls the function IMMEDIATELY when Python reads this line.
-    # The button click will then do nothing because the return value
-    # of the function (None) is stored as command, not the function.
+  HOW A BUTTON CLICK EXECUTES SQL:
+    1. The user enters data into Entry fields and clicks "➕ Save New Item".
+    2. Tkinter fires the button's `command=` function.
+    3. The callback extracts text using `entry.get()`.
+    4. Input validation checks if fields are non-empty and valid numbers.
+    5. The callback calls db_add_item(name, qty), which sends SQL to MySQL.
+    6. On success, `messagebox.showinfo()` shows a confirmation alert.
+    7. `entry.delete(0, tk.END)` clears the input fields for the next entry.
+    8. `refresh_inventory(tree)` queries MySQL and reloads the table.
 
-  CORRECT (runs only when clicked):
-    command = lambda: action_add_item(entry_name, entry_qty, tree)
-    # lambda: creates a no-argument wrapper function.
-    # tkinter stores THIS wrapper as the command and calls it on click.
-    # The wrapper then calls action_add_item() with its arguments.
-
-  VIVA TIP: "lambda is used because tkinter's command= parameter
-  expects a function reference with zero arguments. lambda wraps
-  our function call so we can pass arguments while still giving
-  tkinter a zero-argument callable."
+  WHY IS lambda: MANDATORY ON BUTTONS?
+    • A button's `command=` parameter expects a reference to a function
+      that takes ZERO arguments.
+    • If we write:
+        command = action_add_item(entry_name, entry_qty, tree)
+      Python calls action_add_item IMMEDIATELY at startup when building
+      the window, instead of waiting for the user to click the button!
+    • By writing:
+        command = lambda: action_add_item(entry_name, entry_qty, tree)
+      `lambda:` creates an anonymous zero-argument function that runs
+      ONLY when clicked, passing the widget references at click time.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART M — TREEVIEW: HOW THE TABLE WORKS
+  PART M — ttk.Treeview : TABLE POPULATION & LIVE REFRESHES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  ttk.Treeview is the widget that shows database data as a table.
 
   HOW DATA GETS INTO THE TREEVIEW:
-    1. db_fetch_inventory() runs a SELECT in MariaDB.
-    2. cursor.fetchall() returns a Python list of tuples.
-       Example: [(1, "Beaker", 50), (2, "Test Tube", 120)]
-    3. load_treeview() loops through this list and calls:
+    1. db_fetch_inventory() runs a SELECT query in MySQL.
+    2. cursor.fetchall() returns a list of tuples:
+       [(1, "Beaker 250ml", 50), (2, "Test Tube", 120)]
+    3. load_treeview() iterates through this list:
        tree.insert("", tk.END, values=row)
-       for each tuple — this adds one visible table row.
+       This inserts each tuple as a visible table row.
 
-  HOW THE TABLE IS REFRESHED:
-    After every insert/update/delete operation, refresh_inventory()
-    is called. It first deletes all existing rows with:
-       for item in tree.get_children(): tree.delete(item)
-    Then re-fetches fresh data from MariaDB and re-inserts it.
-    This gives the appearance of a "live" real-time table.
+  HOW LIVE REFRESHES WORK:
+    • A Treeview does not automatically sync with MySQL.
+    • After every Add, Issue, or Restock operation, refresh_inventory()
+      is called:
+        a) Clears old rows: for child in tree.get_children(): tree.delete(child)
+        b) Re-queries MySQL for the latest data.
+        c) Inserts the fresh rows into the Treeview.
+    • This gives the user an instantaneous real-time spreadsheet view.
 
-  VIVA TIP: "The Treeview does not automatically update when the
-  database changes. We manually clear and reload it after every
-  operation by calling refresh_inventory() or refresh_transactions()."
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART N — LOW STOCK ALERT: HOW THE FILTER WORKS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  When user clicks "🔴 Show Low Stock":
-    1. action_low_stock() reads the threshold Entry (e.g. "10")
-    2. It calls db_fetch_inventory(threshold=10)
-    3. db_fetch_inventory() runs:
-         SELECT item_id, name, total_qty FROM Items
-         WHERE total_qty <= 10 ORDER BY total_qty
-    4. MariaDB filters and returns only the matching rows.
-    5. load_treeview() clears the table and shows only those rows.
-
-  When user clicks "🟢 Show All":
-    1. action_show_all() calls refresh_inventory() with no threshold.
-    2. db_fetch_inventory() runs SELECT with no WHERE clause.
-    3. All rows are fetched and displayed again.
-
-  VIVA TIP: "The filtering happens inside MariaDB using a WHERE
-  clause, not in Python. This is more efficient because MariaDB
-  only sends the relevant rows over the connection instead of
-  sending all rows and letting Python filter them."
+  CROSS-PLATFORM MOUSE WHEEL SCROLLING:
+    • Linux X11 uses mouse button events: `<Button-4>` (up) and `<Button-5>` (down).
+    • Windows uses `<MouseWheel>` with `event.delta`.
+    • Our bind_cross_platform_scroll() binds BOTH event types so scrolling
+      works smoothly on any operating system.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  PART O — QUICK VIVA Q&A: GUI-SPECIFIC FLASHCARDS
+  PART N — WHY PROCEDURAL? (CBSE CLASS 12 COMPLIANCE)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Q11: What does root.mainloop() do?
-  A11: It starts tkinter's event loop — an infinite loop that keeps
-       the window alive and responds to user actions like button clicks
-       and key presses. The program exits only when the window is closed.
+  • The CBSE Class 12 Computer Science syllabus (Subject Code 083)
+    focuses on functions, file handling, lists, tuples, dictionaries,
+    and database connectivity using mysql-connector-python.
+  • Object-Oriented Programming (classes, inheritance, polymorphism)
+    was removed from the Class 12 CS curriculum in recent years.
+  • Writing our project entirely using procedural functions ensures:
+    1. 100% compliance with CBSE board guidelines.
+    2. Easy comprehension for external examiners during practical viva.
+    3. Simpler debugging and data flow tracing.
 
-  Q12: What is the difference between tk and ttk?
-  A12: tk is the base tkinter module with standard widgets.
-       ttk is "themed tkinter" — it provides enhanced widgets like
-       Treeview (the data table) with better styling.
 
-  Q13: Why is ttk.Treeview used instead of a simple text printout?
-  A13: Treeview displays database rows as an interactive table with
-       named column headers, making it easy to read and navigate.
-       It also supports scrollbars for large datasets.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART O — 25 HIGH-FREQUENCY VIVA QUESTIONS & MODEL ANSWERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Q14: How does entry.get() work?
-  A14: entry.get() reads and returns the current text string typed
-       inside a tk.Entry widget. It is called at click time (inside
-       the action function) so it always gets the LATEST typed value.
+  === CATEGORY 1: DATABASE & SQL ===
 
-  Q15: How does entry.delete(0, tk.END) work?
-  A15: It clears all text from a tk.Entry widget.
-       0 = start position, tk.END = end of the text string.
-       After calling this, the Entry box appears empty to the user.
+  Q1: What is mysql-connector-python?
+  A1: It is the official Python library that implements the Python DB-API
+      to establish a TCP or socket connection between Python scripts and
+      the MySQL / MariaDB database server.
 
-  Q16: What is a lambda in the context of tkinter buttons?
-  A16: lambda creates a small anonymous function with no arguments.
-       tkinter's command= parameter needs a zero-argument function.
-       lambda wraps our actual function call (which has arguments)
-       so tkinter can call it on click without us needing a named function.
+  Q2: What is the difference between conn and cursor?
+  A2: conn represents the physical communication channel (socket/TCP) to the
+      database server. cursor is a Python control object created within that
+      connection used to execute SQL queries and fetch results.
 
-  Q17: What does messagebox.showerror() do?
-  A17: It pops up a small OS dialog box with a red "X" icon and an
-       error message. Used to alert the user of invalid input or
-       database errors. The user must click OK to dismiss it.
+  Q3: What is the difference between cursor.execute() and conn.commit()?
+  A3: execute() submits SQL queries to the database server but holds changes
+      in an active transaction buffer. commit() permanently flushes and
+      saves those changes to disk storage.
 
-  Q18: What does messagebox.showinfo() do?
-  A18: It pops up a small OS dialog box with a blue "i" icon and a
-       success message. The user must click OK to dismiss it.
+  Q4: When is conn.commit() required, and when is it not?
+  A4: commit() is mandatory for Data Manipulation Language (DML) queries that
+      modify data (INSERT, UPDATE, DELETE). It is NOT required for SELECT
+      queries since reading data does not alter the database.
 
-  Q19: What layout managers are used in the GUI?
-  A19: pack() — places widgets in a top-to-bottom or left-to-right
-                 stack automatically.
-       grid() — places widgets in a row/column grid (like a table).
-       Both are used in different sections for readability.
+  Q5: What is the difference between fetchone() and fetchall()?
+  A5: fetchone() retrieves only the next single row from the cursor buffer as
+      a tuple (or None if no rows remain). fetchall() retrieves all remaining
+      rows as a list of tuples.
 
-  Q20: Is this code Object-Oriented? Does it use classes?
-  A20: No. The code is 100% procedural — it uses only functions,
-       if/elif/else, while loops, lists, and tuples. No classes are
-       defined. This aligns with the CBSE Class 12 CS curriculum.
+  Q6: Why use %s parameterized placeholders instead of string concatenation?
+  A6: %s separates SQL commands from user-supplied data. The driver automatically
+      escapes dangerous characters, completely preventing SQL Injection attacks.
+
+  Q7: What does AUTO_INCREMENT do in the Items table?
+  A7: It instructs MySQL to automatically assign a sequential, unique integer
+      (1, 2, 3...) to item_id for each new row inserted, guaranteeing unique
+      Primary Keys without manual calculation.
+
+  Q8: What is a Foreign Key constraint?
+  A8: A relational rule enforcing referential integrity between two tables.
+      In our project, Transactions.item_id references Items.item_id, preventing
+      transaction records from being linked to non-existent items.
+
+  Q9: What does ON DELETE CASCADE mean?
+  A9: If a parent row in the Items table is deleted, MySQL automatically deletes
+      all corresponding child rows in the Transactions table, preventing orphan
+      records.
+
+  Q10: What is an INNER JOIN?
+  A10: A SQL clause that combines rows from two tables based on a related
+       column. We join Transactions and Items on item_id to display the item's
+       name alongside transaction details.
+
+  === CATEGORY 2: CONFIGURATION & CROSS-PLATFORM ===
+
+  Q11: Why is database configuration kept in db_config.py?
+  A11: To centralize connection parameters (host, user, password, port) in a
+       single file. Changes only need to be made once, making the codebase
+       maintainable and portable.
+
+  Q12: How does initialize_database() prevent startup crashes?
+  A12: It connects to the MySQL server and executes CREATE DATABASE IF NOT EXISTS
+       and CREATE TABLE IF NOT EXISTS. On a new machine, the entire database
+       and table schema are created automatically without manual SQL imports.
+
+  Q13: How does the app achieve cross-platform compatibility?
+  A13: By checking os.name (e.g. 'cls' on Windows vs 'clear' on Linux), avoiding
+       hardcoded file paths, and supporting both TCP port 3306 (Windows) and
+       local unix_socket authentication (Linux MariaDB) automatically.
+
+  Q14: Where do you change the MySQL password if required?
+  A14: Inside the DB_CONFIG dictionary in db_config.py:
+       DB_CONFIG = {"host": "localhost", "user": "root", "password": "your_password"}
+
+  === CATEGORY 3: TERMINAL APP & ERROR HANDLING ===
+
+  Q15: Why is terminal_app.py structured inside a while True loop?
+  A15: To provide a continuous menu interface that stays active after performing
+       actions. It only exits when the user explicitly chooses Option 7.
+
+  Q16: Why is input("\nPress Enter to return to menu...") used?
+  A16: It pauses execution so the user can inspect output tables or confirmation
+       messages before the screen is cleared and the menu re-displays.
+
+  Q17: Why do we wrap int(input(...)) in a try/except ValueError block?
+  A17: If a user enters letters or symbols when a number is expected, int() raises
+       a ValueError. The try/except block catches this exception, prints a friendly
+       error, and returns to the menu safely instead of crashing the program.
+
+  Q18: What is database Atomicity and where is it used?
+  A18: Atomicity ensures that a group of operations all succeed together or all
+       fail together. In issue_item(), both the stock UPDATE and the transaction
+       INSERT are committed together with a single conn.commit().
+
+  === CATEGORY 4: TKINTER GUI ===
+
+  Q19: What is the Tkinter event loop (root.mainloop())?
+  A19: An infinite background loop that keeps the desktop window visible and
+       actively monitors user events like mouse clicks and keystrokes.
+
+  Q20: What is ttk and how does it differ from tk?
+  A20: tk provides basic GUI widgets. ttk ("themed Tk") provides modern,
+       styled widgets such as ttk.Treeview (tables) and ttk.Notebook (tabs).
+
+  Q21: Why do we use lambda: when assigning button commands?
+  A21: Tkinter's command= parameter expects a callable with zero arguments.
+       lambda: creates an anonymous zero-argument function that delays execution
+       until the button is clicked, allowing us to pass widget references.
+
+  Q22: How does entry.get() and entry.delete() work?
+  A22: entry.get() reads the current text string from an Entry box.
+       entry.delete(0, tk.END) clears all characters from index 0 to the end.
+
+  Q23: How does ttk.Treeview display database records?
+  A23: Treeview organizes data into columns. We clear existing rows using
+       tree.delete() and insert rows fetched from MySQL using
+       tree.insert("", tk.END, values=row_tuple).
+
+  Q24: How does the Low Stock Alert work in the GUI?
+  A24: The user enters a threshold number. The GUI executes a SELECT query with
+       `WHERE total_qty <= %s` and repopulates the Treeview with only matching items.
+
+  Q25: Does this project use any Object-Oriented Programming (OOP)?
+  A25: No. It is 100% procedural, using only functions, conditional statements,
+       loops, lists, and tuples, strictly adhering to CBSE Class 12 CS guidelines.
 
 ================================================================
-  END OF ADDENDUM — Phase 2 tkinter GUI Notes
+  END OF REVISION NOTES — CBSE CLASS 12 COMPUTER SCIENCE
 ================================================================

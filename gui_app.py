@@ -1,0 +1,590 @@
+# ================================================================
+#  gui_app.py | School Lab Inventory Manager (Tkinter Desktop GUI)
+#  CBSE Class 12 Computer Science Project
+#
+#  Architecture : Purely Procedural (no classes, zero OOP)
+#  Database     : MySQL / MariaDB via mysql-connector-python
+#  Interface    : tkinter Desktop GUI with ttk.Notebook & ttk.Treeview
+#  Platforms    : Archcraft Linux & Windows (Cross-Platform)
+#
+#  HOW TO RUN:
+#    python gui_app.py
+# ================================================================
+
+import os                                      # module for operating system utilities (e.g. checking platform)
+import tkinter as tk                           # standard Python GUI library for desktop window controls
+from tkinter import ttk                        # themed tkinter module providing modern widgets like Treeview and Notebook
+from tkinter import messagebox                 # tkinter submodule for popup dialog alerts (info, warning, error)
+import mysql.connector                         # database driver enabling Python to communicate with MySQL/MariaDB
+from datetime import date                      # date class from datetime to timestamp inventory transactions
+from db_config import get_connection           # imports centralized database connection factory
+from db_config import initialize_database      # imports automatic database and table creator function
+
+
+# ----------------------------------------------------------------
+# SECTION 1 : DATABASE BACKEND FUNCTIONS (PROCEDURAL CRUD)
+# ----------------------------------------------------------------
+
+def db_add_item(name, qty):
+    # Inserts a new row into the Items table with name and starting quantity.
+
+    conn = get_connection()                    # establishes an active connection to the database
+    cursor = conn.cursor()                     # creates a cursor object to send SQL queries
+
+    sql = "INSERT INTO Items (name, total_qty) VALUES (%s, %s)"  # parameterized SQL insert template
+    cursor.execute(sql, (name, qty))           # executes SQL query safely using parameterized values
+    conn.commit()                              # commits transaction to write changes permanently to disk
+
+    cursor.close()                             # closes the cursor to release database server resources
+    conn.close()                               # closes the database connection
+
+
+def db_issue_item(item_id, qty, purpose):
+    # Deducts stock quantity and inserts an issue record in Transactions.
+    # Returns a tuple: (success: bool, message: str)
+
+    conn = get_connection()                    # opens database connection
+    cursor = conn.cursor()                     # creates cursor
+
+    cursor.execute("SELECT name, total_qty FROM Items WHERE item_id = %s", (item_id,))  # checks item existence
+    row = cursor.fetchone()                    # retrieves one row from database; returns None if not found
+
+    if row is None:                            # checks if the item_id was missing from Items table
+        cursor.close()                         # closes cursor before returning
+        conn.close()                           # closes connection before returning
+        return False, f"Item with ID {item_id} does not exist."  # returns failure status and message
+
+    item_name, current_qty = row               # unpacks item name and stock quantity from result tuple
+
+    if qty > current_qty:                      # checks if requested issue quantity exceeds available stock
+        cursor.close()                         # closes cursor
+        conn.close()                           # closes connection
+        return False, f"Insufficient stock for '{item_name}'. Available: {current_qty} unit(s)."
+
+    # Deduct stock quantity in Items table
+    cursor.execute("UPDATE Items SET total_qty = total_qty - %s WHERE item_id = %s", (qty, item_id))
+
+    # Insert transaction audit record with negative quantity change
+    cursor.execute(
+        "INSERT INTO Transactions (item_id, date, qty_change, purpose) VALUES (%s, %s, %s, %s)",
+        (item_id, date.today(), -qty, purpose)
+    )
+
+    conn.commit()                              # atomically commits both update and insert operations
+    cursor.close()                             # closes cursor
+    conn.close()                               # closes connection
+    return True, f"Issued {qty} unit(s) of '{item_name}'. Remaining: {current_qty - qty} unit(s)."
+
+
+def db_restock_item(item_id, qty, purpose):
+    # Adds stock quantity and inserts a restock record in Transactions.
+    # Returns a tuple: (success: bool, message: str)
+
+    conn = get_connection()                    # opens database connection
+    cursor = conn.cursor()                     # creates cursor
+
+    cursor.execute("SELECT name, total_qty FROM Items WHERE item_id = %s", (item_id,))  # queries item info
+    row = cursor.fetchone()                    # retrieves item row tuple
+
+    if row is None:                            # checks if item was not found
+        cursor.close()                         # closes cursor
+        conn.close()                           # closes connection
+        return False, f"Item with ID {item_id} does not exist."  # returns failure status and message
+
+    item_name, current_qty = row               # unpacks item name and current quantity
+
+    # Add stock quantity in Items table
+    cursor.execute("UPDATE Items SET total_qty = total_qty + %s WHERE item_id = %s", (qty, item_id))
+
+    # Insert transaction audit record with positive quantity change
+    cursor.execute(
+        "INSERT INTO Transactions (item_id, date, qty_change, purpose) VALUES (%s, %s, %s, %s)",
+        (item_id, date.today(), qty, purpose)
+    )
+
+    conn.commit()                              # atomically commits both changes
+    cursor.close()                             # closes cursor
+    conn.close()                               # closes connection
+    return True, f"Restocked '{item_name}' by {qty} unit(s). New balance: {current_qty + qty} unit(s)."
+
+
+def db_fetch_inventory(threshold=None):
+    # Retrieves items from Items table.
+    # If threshold is given, filters by total_qty <= threshold.
+    # Returns a list of tuples: [(item_id, name, total_qty), ...]
+
+    conn = get_connection()                    # opens database connection
+    cursor = conn.cursor()                     # creates cursor
+
+    if threshold is None:                      # checks if full inventory was requested
+        cursor.execute("SELECT item_id, name, total_qty FROM Items ORDER BY item_id ASC")  # all items
+    else:                                      # executes if low stock filter was requested
+        cursor.execute(
+            "SELECT item_id, name, total_qty FROM Items WHERE total_qty <= %s ORDER BY total_qty ASC",
+            (threshold,)
+        )                                      # filtered query using threshold parameter
+
+    rows = cursor.fetchall()                   # fetches all matching rows as a list of tuples
+    cursor.close()                             # closes cursor
+    conn.close()                               # closes connection
+    return rows                                # returns list of tuples to caller
+
+
+def db_fetch_transactions():
+    # Retrieves all transaction audit logs joined with item names.
+    # Returns a list of tuples: [(trans_id, name, date, qty_change, purpose), ...]
+
+    conn = get_connection()                    # opens database connection
+    cursor = conn.cursor()                     # creates cursor
+
+    # SQL query joining Transactions with Items to get descriptive item names
+    sql = """
+    SELECT t.trans_id,
+           i.name,
+           t.date,
+           t.qty_change,
+           t.purpose
+    FROM   Transactions t
+    JOIN   Items i ON t.item_id = i.item_id
+    ORDER  BY t.trans_id DESC
+    """                                        # orders records newest first
+    cursor.execute(sql)                        # executes join query
+    rows = cursor.fetchall()                   # fetches all joined rows as list of tuples
+
+    cursor.close()                             # closes cursor
+    conn.close()                               # closes connection
+    return rows                                # returns list of tuples to caller
+
+
+# ----------------------------------------------------------------
+# SECTION 2 : GUI ACTION CALLBACK FUNCTIONS
+# ----------------------------------------------------------------
+
+def action_add_item(entry_name, entry_qty, tree_inventory):
+    # Triggered when user clicks "Add Item" button.
+    # Validates input, updates database, and refreshes the inventory table.
+
+    name = entry_name.get().strip()            # extracts text from item name Entry field
+    if not name:                               # validates that name is not empty
+        messagebox.showerror("Validation Error", "Item name cannot be empty.")  # displays error alert
+        return                                 # aborts operation
+
+    qty_str = entry_qty.get().strip()          # extracts text from quantity Entry field
+    if qty_str == "":                          # checks if quantity was left blank
+        qty = 0                                # sets default quantity to 0
+    else:                                      # executes if quantity text was provided
+        try:                                   # handles non-integer input conversions
+            qty = int(qty_str)                 # converts string to integer
+            if qty < 0:                        # validates non-negative quantity
+                messagebox.showerror("Validation Error", "Quantity cannot be negative.")  # displays error
+                return                         # aborts operation
+        except ValueError:                     # catches conversion failure
+            messagebox.showerror("Validation Error", "Quantity must be a valid whole number.")  # displays error
+            return                             # aborts operation
+
+    try:                                       # handles database operation exceptions
+        db_add_item(name, qty)                 # calls procedural backend insert function
+        messagebox.showinfo("Success", f"Item '{name}' successfully added with quantity {qty}!")  # success alert
+        entry_name.delete(0, tk.END)           # clears name Entry field
+        entry_qty.delete(0, tk.END)            # clears quantity Entry field
+        refresh_inventory(tree_inventory)      # reloads inventory Treeview table immediately
+    except mysql.connector.Error as err:       # catches potential database errors
+        messagebox.showerror("Database Error", f"Failed to add item:\n{err}")  # shows database error alert
+
+
+def action_issue_item(entry_id, entry_qty, entry_purpose, tree_inventory, tree_transactions):
+    # Triggered when user clicks "Issue Item" button.
+    # Deducts stock, writes transaction log, and refreshes both tables.
+
+    id_str = entry_id.get().strip()            # reads Item ID entry
+    qty_str = entry_qty.get().strip()          # reads Quantity entry
+    purpose = entry_purpose.get().strip()      # reads Purpose entry
+
+    try:                                       # validates numeric inputs
+        item_id = int(id_str)                  # converts item_id to integer
+        if item_id <= 0:                       # checks for positive ID
+            messagebox.showerror("Validation Error", "Item ID must be a positive integer.")  # shows alert
+            return                             # aborts operation
+    except ValueError:                         # catches invalid non-numeric ID
+        messagebox.showerror("Validation Error", "Item ID must be a valid whole number.")  # shows alert
+        return                                 # aborts operation
+
+    try:                                       # validates numeric quantity
+        qty = int(qty_str)                     # converts quantity to integer
+        if qty <= 0:                           # checks for positive quantity
+            messagebox.showerror("Validation Error", "Quantity to issue must be greater than 0.")  # shows alert
+            return                             # aborts operation
+    except ValueError:                         # catches invalid non-numeric quantity
+        messagebox.showerror("Validation Error", "Quantity must be a valid whole number.")  # shows alert
+        return                                 # aborts operation
+
+    try:                                       # handles database execution exceptions
+        success, msg = db_issue_item(item_id, qty, purpose)  # calls backend issue function
+        if success:                            # checks if issue succeeded
+            messagebox.showinfo("Success", msg)  # displays success alert
+            entry_id.delete(0, tk.END)         # clears ID field
+            entry_qty.delete(0, tk.END)        # clears quantity field
+            entry_purpose.delete(0, tk.END)    # clears purpose field
+            refresh_inventory(tree_inventory)  # updates inventory table to show lowered stock
+            refresh_transactions(tree_transactions)  # updates transactions table to show issue log
+        else:                                  # executes if issue failed (e.g. insufficient stock)
+            messagebox.showerror("Issue Failed", msg)  # displays failure alert
+    except mysql.connector.Error as err:       # catches database errors
+        messagebox.showerror("Database Error", f"Database error occurred:\n{err}")  # displays error alert
+
+
+def action_restock_item(entry_id, entry_qty, entry_purpose, tree_inventory, tree_transactions):
+    # Triggered when user clicks "Restock Item" button.
+    # Adds stock, writes transaction log, and refreshes both tables.
+
+    id_str = entry_id.get().strip()            # reads Item ID entry
+    qty_str = entry_qty.get().strip()          # reads Quantity entry
+    purpose = entry_purpose.get().strip()      # reads Purpose entry
+
+    try:                                       # validates numeric inputs
+        item_id = int(id_str)                  # converts item_id to integer
+        if item_id <= 0:                       # checks for positive ID
+            messagebox.showerror("Validation Error", "Item ID must be a positive integer.")  # shows alert
+            return                             # aborts operation
+    except ValueError:                         # catches invalid non-numeric ID
+        messagebox.showerror("Validation Error", "Item ID must be a valid whole number.")  # shows alert
+        return                                 # aborts operation
+
+    try:                                       # validates numeric quantity
+        qty = int(qty_str)                     # converts quantity to integer
+        if qty <= 0:                           # checks for positive quantity
+            messagebox.showerror("Validation Error", "Quantity to restock must be greater than 0.")  # shows alert
+            return                             # aborts operation
+    except ValueError:                         # catches invalid non-numeric quantity
+        messagebox.showerror("Validation Error", "Quantity must be a valid whole number.")  # shows alert
+        return                                 # aborts operation
+
+    try:                                       # handles database execution exceptions
+        success, msg = db_restock_item(item_id, qty, purpose)  # calls backend restock function
+        if success:                            # checks if restock succeeded
+            messagebox.showinfo("Success", msg)  # displays success alert
+            entry_id.delete(0, tk.END)         # clears ID field
+            entry_qty.delete(0, tk.END)        # clears quantity field
+            entry_purpose.delete(0, tk.END)    # clears purpose field
+            refresh_inventory(tree_inventory)  # updates inventory table to show increased stock
+            refresh_transactions(tree_transactions)  # updates transactions table to show restock log
+        else:                                  # executes if restock failed (e.g. item ID not found)
+            messagebox.showerror("Restock Failed", msg)  # displays failure alert
+    except mysql.connector.Error as err:       # catches database errors
+        messagebox.showerror("Database Error", f"Database error occurred:\n{err}")  # displays error alert
+
+
+def action_low_stock(entry_threshold, tree_inventory):
+    # Filters inventory table to show only items whose stock is <= threshold.
+
+    t_str = entry_threshold.get().strip()      # reads threshold entry text
+    try:                                       # validates numeric input
+        threshold = int(t_str)                 # converts threshold string to integer
+        if threshold < 0:                      # checks for non-negative number
+            messagebox.showerror("Validation Error", "Threshold cannot be negative.")  # displays error
+            return                             # aborts operation
+    except ValueError:                         # catches non-numeric input
+        messagebox.showerror("Validation Error", "Threshold must be a valid whole number.")  # displays error
+        return                                 # aborts operation
+
+    try:                                       # handles database query exceptions
+        rows = db_fetch_inventory(threshold)   # fetches filtered items from database
+        load_treeview(tree_inventory, rows)    # loads filtered rows into inventory Treeview
+        if not rows:                           # checks if no items were at or below the threshold
+            messagebox.showinfo("Low Stock Info", f"No items found with stock <= {threshold}.")  # info popup
+    except mysql.connector.Error as err:       # catches database errors
+        messagebox.showerror("Database Error", f"Failed to filter inventory:\n{err}")  # displays error
+
+
+def action_show_all(tree_inventory):
+    # Resets filter and displays all items in the inventory Treeview.
+
+    refresh_inventory(tree_inventory)          # fetches all records and reloads the table
+
+
+# ----------------------------------------------------------------
+# SECTION 3 : TREEVIEW HELPER FUNCTIONS
+# ----------------------------------------------------------------
+
+def load_treeview(tree, rows):
+    # Clears current contents of a Treeview widget and inserts new data rows.
+
+    for child in tree.get_children():          # loops through all current row identifiers in Treeview
+        tree.delete(child)                     # removes each old row from the display
+
+    for row in rows:                           # loops through each new tuple received from database
+        tree.insert("", tk.END, values=row)    # appends the tuple as a new row at the bottom of the table
+
+
+def refresh_inventory(tree_inventory):
+    # Re-queries the Items table and populates the inventory Treeview.
+
+    try:                                       # handles database exceptions
+        rows = db_fetch_inventory()            # fetches all rows without filtering
+        load_treeview(tree_inventory, rows)    # repopulates the Treeview table
+    except mysql.connector.Error as err:       # catches database errors
+        messagebox.showerror("Database Error", f"Failed to refresh inventory:\n{err}")  # displays error
+
+
+def refresh_transactions(tree_transactions):
+    # Re-queries the Transactions table and populates the transactions Treeview.
+
+    try:                                       # handles database exceptions
+        raw_rows = db_fetch_transactions()     # fetches all joined transaction records
+        formatted_rows = []                    # initializes empty list to hold formatted tuples
+        for row in raw_rows:                   # loops through each raw transaction tuple
+            tid, name, dt, change, purp = row  # unpacks the 5 columns
+            purp_val = purp if purp else "N/A"  # replaces empty purpose with "N/A"
+            change_val = f"+{change}" if change > 0 else str(change)  # adds '+' prefix for positive restocks
+            formatted_rows.append((tid, name, str(dt), change_val, purp_val))  # appends formatted tuple
+        load_treeview(tree_transactions, formatted_rows)  # repopulates the Treeview table
+    except mysql.connector.Error as err:       # catches database errors
+        messagebox.showerror("Database Error", f"Failed to refresh transactions:\n{err}")  # displays error
+
+
+# ----------------------------------------------------------------
+# SECTION 4 : GUI WIDGET BUILDER FUNCTIONS
+# ----------------------------------------------------------------
+
+def bind_cross_platform_scroll(tree):
+    # Binds mouse wheel scrolling to a Treeview widget across both Linux and Windows.
+
+    tree.bind("<Button-4>", lambda event: tree.yview_scroll(-1, "units"))  # mouse scroll up on Linux
+    tree.bind("<Button-5>", lambda event: tree.yview_scroll(1, "units"))   # mouse scroll down on Linux
+    tree.bind("<MouseWheel>", lambda event: tree.yview_scroll(int(-1 * (event.delta / 120)), "units"))  # Windows
+
+
+def build_add_item_frame(parent, tree_inventory):
+    # Builds the "Add New Lab Item" form inside parent container.
+
+    frame = tk.LabelFrame(parent, text="➕ Add New Lab Item", padx=15, pady=12, font=("Arial", 11, "bold"))
+    frame.pack(fill="x", padx=15, pady=10)     # places LabelFrame stretched horizontally
+
+    tk.Label(frame, text="Item Name:", font=("Arial", 10)).grid(row=0, column=0, sticky="w", pady=5)
+    entry_name = tk.Entry(frame, width=32, font=("Arial", 10))  # entry field for item name
+    entry_name.grid(row=0, column=1, padx=10, pady=5)          # aligns field in grid
+
+    tk.Label(frame, text="Starting Quantity:", font=("Arial", 10)).grid(row=1, column=0, sticky="w", pady=5)
+    entry_qty = tk.Entry(frame, width=12, font=("Arial", 10))   # entry field for quantity
+    entry_qty.grid(row=1, column=1, sticky="w", padx=10, pady=5)  # aligns field in grid
+
+    btn_add = tk.Button(                       # creates Add Item submission button
+        frame,
+        text="➕ Save New Item",
+        font=("Arial", 10, "bold"),
+        bg="#2E7D32",                          # dark green background
+        fg="white",                            # white text
+        padx=10,
+        pady=3,
+        command=lambda: action_add_item(entry_name, entry_qty, tree_inventory)  # zero-arg callback wrapper
+    )
+    btn_add.grid(row=2, column=1, sticky="w", padx=10, pady=10)  # places button in grid
+
+
+def build_issue_restock_frame(parent, tree_inventory, tree_transactions):
+    # Builds the unified "Issue & Restock" form inside parent container.
+
+    frame = tk.LabelFrame(parent, text="🔄 Issue / Restock Item", padx=15, pady=12, font=("Arial", 11, "bold"))
+    frame.pack(fill="x", padx=15, pady=10)     # places LabelFrame stretched horizontally
+
+    tk.Label(frame, text="Item ID:", font=("Arial", 10)).grid(row=0, column=0, sticky="w", pady=5)
+    entry_id = tk.Entry(frame, width=12, font=("Arial", 10))    # entry field for item ID
+    entry_id.grid(row=0, column=1, sticky="w", padx=10, pady=5)
+
+    tk.Label(frame, text="Quantity:", font=("Arial", 10)).grid(row=1, column=0, sticky="w", pady=5)
+    entry_qty = tk.Entry(frame, width=12, font=("Arial", 10))   # entry field for quantity change
+    entry_qty.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+
+    tk.Label(frame, text="Purpose / Reason:", font=("Arial", 10)).grid(row=2, column=0, sticky="w", pady=5)
+    entry_purpose = tk.Entry(frame, width=32, font=("Arial", 10))  # entry field for purpose description
+    entry_purpose.grid(row=2, column=1, padx=10, pady=5)
+
+    btn_box = tk.Frame(frame)                  # horizontal container frame for action buttons
+    btn_box.grid(row=3, column=1, sticky="w", padx=10, pady=10)  # places button container in grid
+
+    btn_issue = tk.Button(                     # creates Issue Item button
+        btn_box,
+        text="📤 Issue (Take Out)",
+        font=("Arial", 10, "bold"),
+        bg="#C62828",                          # dark red background
+        fg="white",
+        padx=8,
+        pady=3,
+        command=lambda: action_issue_item(entry_id, entry_qty, entry_purpose, tree_inventory, tree_transactions)
+    )
+    btn_issue.pack(side="left", padx=(0, 10))   # packs button on left side of container
+
+    btn_restock = tk.Button(                   # creates Restock Item button
+        btn_box,
+        text="📥 Restock (Add In)",
+        font=("Arial", 10, "bold"),
+        bg="#1565C0",                          # dark blue background
+        fg="white",
+        padx=8,
+        pady=3,
+        command=lambda: action_restock_item(entry_id, entry_qty, entry_purpose, tree_inventory, tree_transactions)
+    )
+    btn_restock.pack(side="left")              # packs button alongside Issue button
+
+
+def build_inventory_frame(parent):
+    # Builds the Live Inventory section featuring Treeview table and Low Stock filter.
+    # Returns the Treeview widget so callers can trigger refreshes.
+
+    frame = tk.LabelFrame(parent, text="📦 Live Laboratory Inventory", padx=12, pady=12, font=("Arial", 11, "bold"))
+    frame.pack(fill="both", expand=True, padx=15, pady=10)  # expands to fill available window space
+
+    # --- Filter Toolbar ---
+    toolbar = tk.Frame(frame)                  # container frame for filter controls
+    toolbar.pack(fill="x", pady=(0, 10))       # places toolbar at top of inventory frame
+
+    tk.Label(toolbar, text="Low Stock Threshold:", font=("Arial", 10)).pack(side="left", padx=(0, 6))
+    entry_threshold = tk.Entry(toolbar, width=8, font=("Arial", 10))  # input box for threshold quantity
+    entry_threshold.pack(side="left", padx=(0, 8))
+
+    tree_ref = [None]                          # list reference holder to allow lambda access to treeview
+
+    btn_filter = tk.Button(                    # button to apply low stock filter
+        toolbar,
+        text="⚠️ Show Low Stock",
+        font=("Arial", 9, "bold"),
+        bg="#EF6C00",                          # warning orange background
+        fg="white",
+        command=lambda: action_low_stock(entry_threshold, tree_ref[0])  # filters table using threshold
+    )
+    btn_filter.pack(side="left", padx=4)
+
+    btn_all = tk.Button(                       # button to reset filter and show all items
+        toolbar,
+        text="🔄 Show All Items",
+        font=("Arial", 9, "bold"),
+        bg="#455A64",                          # neutral grey-blue background
+        fg="white",
+        command=lambda: action_show_all(tree_ref[0])  # resets filter to show entire inventory
+    )
+    btn_all.pack(side="left", padx=4)
+
+    # --- Table View ---
+    columns = ("item_id", "name", "total_qty")  # internal column identifiers
+    tree = ttk.Treeview(frame, columns=columns, show="headings", height=12)  # tabular Treeview widget
+
+    tree.heading("item_id", text="Item ID")    # sets column header title
+    tree.heading("name", text="Item Name")     # sets column header title
+    tree.heading("total_qty", text="Quantity in Stock")  # sets column header title
+
+    tree.column("item_id", width=80, anchor="center")    # sets column width and text alignment
+    tree.column("name", width=320, anchor="w")           # left-aligns descriptive item names
+    tree.column("total_qty", width=140, anchor="center") # center-aligns numeric stock values
+
+    scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)  # creates vertical scrollbar
+    tree.configure(yscrollcommand=scrollbar.set)  # attaches scrollbar to Treeview vertical position
+    bind_cross_platform_scroll(tree)           # attaches mouse wheel scrolling for Linux & Windows
+
+    tree.pack(side="left", fill="both", expand=True)  # packs Treeview to fill left and center
+    scrollbar.pack(side="right", fill="y")     # packs scrollbar along right edge
+
+    tree_ref[0] = tree                         # stores tree instance in mutable holder for callback lambdas
+    return tree                                # returns tree reference to caller
+
+
+def build_transactions_frame(parent):
+    # Builds the Transaction Audit History section featuring a Treeview table.
+    # Returns the Treeview widget reference.
+
+    frame = tk.LabelFrame(parent, text="📋 Transaction Audit Log", padx=12, pady=12, font=("Arial", 11, "bold"))
+    frame.pack(fill="both", expand=True, padx=15, pady=10)  # expands to fill available window space
+
+    columns = ("trans_id", "name", "date", "qty_change", "purpose")  # column identifiers
+    tree = ttk.Treeview(frame, columns=columns, show="headings", height=12)  # Treeview widget
+
+    tree.heading("trans_id", text="TID")       # sets column header title
+    tree.heading("name", text="Item Name")     # sets column header title
+    tree.heading("date", text="Date")          # sets column header title
+    tree.heading("qty_change", text="Qty Change")  # sets column header title
+    tree.heading("purpose", text="Purpose")    # sets column header title
+
+    tree.column("trans_id", width=60, anchor="center")   # TID column formatting
+    tree.column("name", width=200, anchor="w")           # Item name column formatting
+    tree.column("date", width=110, anchor="center")      # Date column formatting
+    tree.column("qty_change", width=100, anchor="center") # Qty change column formatting
+    tree.column("purpose", width=260, anchor="w")        # Purpose column formatting
+
+    scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)  # vertical scrollbar
+    tree.configure(yscrollcommand=scrollbar.set)  # attaches scrollbar to Treeview
+    bind_cross_platform_scroll(tree)           # attaches cross-platform mouse wheel scrolling
+
+    tree.pack(side="left", fill="both", expand=True)  # packs Treeview to fill space
+    scrollbar.pack(side="right", fill="y")     # packs scrollbar on right edge
+
+    return tree                                # returns Treeview reference to caller
+
+
+# ----------------------------------------------------------------
+# SECTION 5 : MAIN APPLICATION WINDOW BUILDER
+# ----------------------------------------------------------------
+
+def build_main_window():
+    # Assembles the primary application window, tabs, and runs tkinter event loop.
+
+    initialize_database()                      # ensures database and tables exist before UI displays
+
+    root = tk.Tk()                             # instantiates root application window
+    root.title("School Lab Inventory Manager — CBSE Class 12 CS Project")  # sets window title bar text
+    root.geometry("820x680")                   # sets window default dimensions (width x height)
+    root.minsize(700, 500)                     # sets minimum allowed window size to prevent layout breakage
+    root.configure(bg="#F0F2F5")               # sets main window background color
+
+    # Top Header Banner
+    header = tk.Label(                         # creates top colored header banner
+        root,
+        text="🔬 School Lab Inventory Manager",
+        font=("Arial", 16, "bold"),
+        bg="#0D47A1",                          # deep blue header banner
+        fg="white",
+        pady=10
+    )
+    header.pack(fill="x")                      # stretches banner across top width
+
+    subheader = tk.Label(                      # creates subtitle line
+        root,
+        text="CBSE Class 12 Computer Science  |  Purely Procedural Python + MariaDB / MySQL",
+        font=("Arial", 9),
+        bg="#1565C0",                          # lighter blue background
+        fg="#E3F2FD",                          # light blue text
+        pady=3
+    )
+    subheader.pack(fill="x")                   # stretches subtitle across top width
+
+    # Tabbed Notebook Interface
+    notebook = ttk.Notebook(root)              # creates Notebook container for organizing tabs
+    notebook.pack(fill="both", expand=True, padx=12, pady=12)  # fills remaining window area
+
+    tab_manage = tk.Frame(notebook, bg="#F0F2F5")        # container frame for Tab 1 (Manage Items)
+    tab_inventory = tk.Frame(notebook, bg="#F0F2F5")     # container frame for Tab 2 (Live Inventory)
+    tab_transactions = tk.Frame(notebook, bg="#F0F2F5")  # container frame for Tab 3 (Audit Log)
+
+    notebook.add(tab_manage, text="  ✏️ Manage Items  ")          # adds Tab 1 to Notebook
+    notebook.add(tab_inventory, text="  📦 Live Inventory  ")      # adds Tab 2 to Notebook
+    notebook.add(tab_transactions, text="  📋 Transaction Log  ")  # adds Tab 3 to Notebook
+
+    # Build Tables in their respective tabs
+    tree_inventory = build_inventory_frame(tab_inventory)        # builds inventory table in Tab 2
+    tree_transactions = build_transactions_frame(tab_transactions)  # builds transactions table in Tab 3
+
+    # Build Input Forms in Tab 1
+    build_add_item_frame(tab_manage, tree_inventory)             # builds Add Item form
+    build_issue_restock_frame(tab_manage, tree_inventory, tree_transactions)  # builds Issue/Restock form
+
+    # Initial Data Load from Database
+    refresh_inventory(tree_inventory)          # populates inventory table with live database data
+    refresh_transactions(tree_transactions)    # populates transactions table with live database data
+
+    root.mainloop()                            # starts tkinter event loop to process user clicks and inputs
+
+
+# ----------------------------------------------------------------
+# SECTION 6 : PROGRAM ENTRY POINT GUARD
+# ----------------------------------------------------------------
+
+if __name__ == "__main__":                     # ensures code executes only when file is run directly
+    build_main_window()                        # starts the desktop GUI application
