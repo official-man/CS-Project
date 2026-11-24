@@ -4,13 +4,15 @@
 #
 #  Architecture : Purely Procedural (no classes, zero OOP)
 #  Database     : MySQL / MariaDB via mysql-connector-python
-#  Platforms    : Archcraft Linux & Windows (Cross-Platform)
+#  Platforms    : Archcraft Linux & Windows 10 (Cross-Platform)
 #
 #  HOW TO RUN:
-#    python terminal_app.py
+#    Linux   : ./run_terminal.sh   OR   source venv/bin/activate && python terminal_app.py
+#    Windows : run_terminal.bat    OR   venv\Scripts\activate   && python terminal_app.py
 # ================================================================
 
 import os                                      # module for operating system utilities (cross-platform screen clear)
+import sys                                     # module to access interpreter settings like stdout encoding
 import mysql.connector                         # MySQL database connector driver for Python
 from datetime import date                      # date module to obtain current calendar date for transaction timestamps
 from db_config import get_connection           # imports database connection helper from db_config.py
@@ -20,6 +22,21 @@ from db_config import initialize_database      # imports database auto-initialis
 # ----------------------------------------------------------------
 # SECTION 1 : UTILITY FUNCTIONS
 # ----------------------------------------------------------------
+
+def setup_encoding():
+    # On Windows 10, cmd.exe uses cp1252 encoding by default.
+    # Printing UTF-8 characters (even plain ASCII via print) can raise
+    # UnicodeEncodeError if the terminal encoding does not support it.
+    # This function switches stdout and stderr to UTF-8 on Windows so
+    # all output is handled safely.  On Linux this is a no-op.
+
+    if os.name == "nt":                        # checks if running on Windows ('nt' = Windows NT family)
+        try:                                   # attempts to reconfigure stdout encoding
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # switches stdout to UTF-8
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # switches stderr to UTF-8
+        except AttributeError:                 # older Python versions may not have reconfigure()
+            pass                               # silently skip — standard output will still work
+
 
 def clear_screen():
     # Clears the terminal screen in a cross-platform manner.
@@ -46,7 +63,7 @@ def add_item():
     # Prompts for item details and inserts a new row into the Items table.
 
     print("\n" + "-" * 40)                     # prints horizontal separator line
-    print("         ➕ ADD NEW LAB ITEM")        # prints feature screen heading
+    print("         [+] ADD NEW LAB ITEM")     # prints feature screen heading
     print("-" * 40)                            # prints horizontal separator line
 
     name = input("Enter item name: ").strip()  # prompts user for item name and removes surrounding whitespace
@@ -89,7 +106,7 @@ def issue_item():
     # Deducts stock quantity from an existing item and logs the issue in Transactions.
 
     print("\n" + "-" * 40)                     # prints horizontal separator line
-    print("          📤 ISSUE LAB ITEM")        # prints feature screen heading
+    print("          [OUT] ISSUE LAB ITEM")    # prints feature screen heading
     print("-" * 40)                            # prints horizontal separator line
 
     id_input = input("Enter Item ID to issue: ").strip()  # prompts for the unique ID of the item
@@ -159,7 +176,7 @@ def restock_item():
     # Adds stock quantity to an existing item and logs the restock in Transactions.
 
     print("\n" + "-" * 40)                     # prints horizontal separator line
-    print("         📥 RESTOCK LAB ITEM")       # prints feature screen heading
+    print("         [IN] RESTOCK LAB ITEM")    # prints feature screen heading
     print("-" * 40)                            # prints horizontal separator line
 
     id_input = input("Enter Item ID to restock: ").strip()  # prompts for the ID of the item to restock
@@ -223,7 +240,7 @@ def view_inventory():
     # Retrieves all records from the Items table and displays them in a neat table.
 
     print("\n" + "=" * 55)                     # prints horizontal separator line
-    print("               📦 FULL LAB INVENTORY")  # prints feature screen heading
+    print("            [*] FULL LAB INVENTORY")  # prints feature screen heading
     print("=" * 55)                            # prints horizontal separator line
 
     try:                                       # starts error-handling block for database operations
@@ -254,7 +271,7 @@ def check_low_stock():
     # Prompts for a threshold quantity and displays items at or below that threshold.
 
     print("\n" + "=" * 55)                     # prints horizontal separator line
-    print("             ⚠️  LOW STOCK ALERT MONITOR")  # prints feature screen heading
+    print("           [!] LOW STOCK ALERT MONITOR")  # prints feature screen heading
     print("=" * 55)                            # prints horizontal separator line
 
     thresh_input = input("Enter minimum stock threshold: ").strip()  # prompts user for threshold value
@@ -297,7 +314,7 @@ def view_transactions():
     # Displays transaction audit log by performing an INNER JOIN on Transactions and Items.
 
     print("\n" + "=" * 78)                     # prints horizontal separator line
-    print("                      📋 TRANSACTION AUDIT LOG")  # prints feature screen heading
+    print("                   [LOG] TRANSACTION AUDIT LOG")  # prints feature screen heading
     print("=" * 78)                            # prints horizontal separator line
 
     try:                                       # starts error-handling block for database operations
@@ -343,20 +360,21 @@ def main():
     # Main program entry point. Runs an unbroken while True loop
     # that only terminates when the user explicitly chooses option 7.
 
+    setup_encoding()                           # ensures UTF-8 output on Windows cmd.exe; no-op on Linux
     initialize_database()                      # ensures database and tables exist prior to user interactions
 
     while True:                                # infinite loop to keep menu active until explicit user exit
         print("\n" + "=" * 50)                 # top banner border
-        print("     🔬 SCHOOL LAB INVENTORY MANAGER")  # main menu title
-        print("     CBSE Class 12 Computer Science Project")  # project subtitle
+        print("     SCHOOL LAB INVENTORY MANAGER")       # main menu title
+        print("     CBSE Class 12 Computer Science")     # project subtitle
         print("=" * 50)                        # border separator
-        print("  1. ➕ Add New Item")           # menu option 1
-        print("  2. 📤 Issue Item (Take Out)")  # menu option 2
-        print("  3. 📥 Restock Item (Add In)")  # menu option 3
-        print("  4. 📦 View Full Inventory")    # menu option 4
-        print("  5. ⚠️  Check Low Stock Alert")  # menu option 5
-        print("  6. 📋 View Transaction History")  # menu option 6
-        print("  7. ❌ Exit")                  # menu option 7
+        print("  1. Add New Item")             # menu option 1
+        print("  2. Issue Item  (Take Out)")   # menu option 2
+        print("  3. Restock Item (Add In)")    # menu option 3
+        print("  4. View Full Inventory")      # menu option 4
+        print("  5. Check Low Stock Alert")    # menu option 5
+        print("  6. View Transaction History") # menu option 6
+        print("  7. Exit")                     # menu option 7
         print("=" * 50)                        # bottom menu border
 
         choice = input("Enter your choice (1-7): ").strip()  # prompts user for menu selection

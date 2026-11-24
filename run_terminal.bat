@@ -4,32 +4,87 @@ REM  run_terminal.bat — Windows launcher for terminal_app.py
 REM  School Lab Inventory Manager | CBSE Class 12 CS Project
 REM
 REM  HOW TO USE:
-REM    Double-click this file  OR  run from Command Prompt:
+REM    Double-click this file  OR  open Command Prompt here and run:
 REM      run_terminal.bat
 REM
-REM  This script automatically creates the virtual environment
-REM  if it is missing, installs mysql-connector-python, and
-REM  launches terminal_app.py using the venv Python.
+REM  This script:
+REM    1. Finds Python (tries 'python' then 'py' launcher)
+REM    2. Creates the virtual environment (venv) if missing
+REM    3. Installs mysql-connector-python if missing
+REM    4. Launches terminal_app.py using the venv Python
 REM =============================================================
 
+@chcp 65001 >nul 2>&1
+REM ^ Switch console code page to UTF-8 (65001) so characters render correctly
+
+echo.
+echo  ============================================
+echo   School Lab Inventory Manager -- Launcher
+echo  ============================================
 echo.
 
-REM --- Step 1: Create venv if missing --------------------------
-IF NOT EXIST "venv\" (
-    echo   [Setup] venv not found. Creating virtual environment...
-    python -m venv venv
-    echo   [Setup] Virtual environment created.
+REM --- Step 1: Detect Python command ---------------------------
+REM Try 'python' first (standard install with PATH ticked)
+python --version >nul 2>&1
+IF NOT ERRORLEVEL 1 (
+    SET PYCMD=python
+    GOTO :found_python
 )
 
-REM --- Step 2: Install mysql-connector-python if missing -------
+REM Try 'py' next (Windows Python Launcher, installed by default)
+py --version >nul 2>&1
+IF NOT ERRORLEVEL 1 (
+    SET PYCMD=py
+    GOTO :found_python
+)
+
+REM Neither found -- give a helpful error
+echo  [ERROR] Python was not found on this computer.
+echo.
+echo  To fix this:
+echo    1. Download Python from https://python.org/downloads
+echo    2. During install, tick "Add Python to PATH"
+echo    3. Re-run this file.
+echo.
+pause
+EXIT /B 1
+
+:found_python
+echo  [OK] Python found: using '%PYCMD%'
+
+REM --- Step 2: Create venv if missing --------------------------
+IF NOT EXIST "venv\" (
+    echo  [Setup] Creating virtual environment...
+    %PYCMD% -m venv venv
+    IF ERRORLEVEL 1 (
+        echo  [ERROR] Failed to create virtual environment.
+        echo  You may need administrator rights on this machine.
+        echo  Ask your teacher / IT admin to run this once as Admin.
+        pause
+        EXIT /B 1
+    )
+    echo  [Setup] Virtual environment created.
+)
+
+REM --- Step 3: Install mysql-connector-python if missing --------
 venv\Scripts\python.exe -c "import mysql.connector" >nul 2>&1
 IF ERRORLEVEL 1 (
-    echo   [Setup] Installing mysql-connector-python...
+    echo  [Setup] Installing mysql-connector-python...
+    echo  [Setup] (Needs internet connection -- may take 30 seconds)
     venv\Scripts\pip.exe install --quiet mysql-connector-python
-    echo   [Setup] Installation complete.
+    IF ERRORLEVEL 1 (
+        echo  [ERROR] pip install failed.
+        echo  Check your internet connection and try again.
+        pause
+        EXIT /B 1
+    )
+    echo  [Setup] Installation complete.
 )
 
-REM --- Step 3: Launch terminal app -----------------------------
+REM --- Step 4: Launch the terminal app -------------------------
+echo.
+echo  [OK] Launching terminal_app.py ...
 echo.
 venv\Scripts\python.exe terminal_app.py
+echo.
 pause
