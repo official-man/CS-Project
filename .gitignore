@@ -25,3 +25,6 @@ __pycache__/
 # --- Documents & PDFs ---
 *.pdf
 
+# --- Third-party Agent Skills ---
+.agents/
+skills-lock.json

@@ -205,6 +205,15 @@
     • If an unhandled exception or crash occurs before commit(),
       MySQL automatically rolls back, preserving data integrity.
 
+  HOW PYTHON GETS THE NEW ITEM ID (cursor.lastrowid):
+    • When a new item is inserted, MySQL assigns it an AUTO_INCREMENT ID.
+    • Python accesses this newly generated ID using: `cursor.lastrowid`
+    • This allows the program to immediately display:
+      "Item 'Beaker' added successfully with Item ID 1 and quantity 50."
+    • The user instantly knows the unique Item ID to use for future issues/restocks!
+  VIVA TIP: "cursor.lastrowid retrieves the auto-increment Primary Key generated
+  by the most recent INSERT statement executed on that cursor."
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   PART F — READ (SELECT) : view_inventory() & FETCHING DATA
